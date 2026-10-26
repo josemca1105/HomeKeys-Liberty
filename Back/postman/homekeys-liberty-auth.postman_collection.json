@@ -1,0 +1,125 @@
+{
+  "info": {
+    "name": "HomeKeys Liberty - Iteration 1 Auth",
+    "description": "Login, user creation, and logout tests. Set adminEmail, adminPassword, and newUserPassword before running the collection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@example.com"
+    },
+    {
+      "key": "adminPassword",
+      "value": ""
+    },
+    {
+      "key": "newUserPassword",
+      "value": ""
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Login administrator",
+      "auth": {
+        "type": "noauth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('Login succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(responseBody.success).to.eql(true);",
+              "});",
+              "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
+              "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "response": []
+    },
+    {
+      "name": "Create user with default PARTNER role",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Nuevo\",\n  \"lastName\": \"Asesor\",\n  \"email\": \"partner-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null\n}"
+        },
+        "url": "{{baseUrl}}/users/add"
+      },
+      "response": []
+    },
+    {
+      "name": "Create user with ADMIN role",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Nuevo\",\n  \"lastName\": \"Administrador\",\n  \"email\": \"admin-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"ADMIN\"\n}"
+        },
+        "url": "{{baseUrl}}/users/add"
+      },
+      "response": []
+    },
+    {
+      "name": "Logout",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/auth/logout"
+      },
+      "response": []
+    }
+  ]
+}
