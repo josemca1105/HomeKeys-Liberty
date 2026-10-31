@@ -30,6 +30,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - JWT revocation through SHA-256 token hashes.
 - Current user and role revalidation against PostgreSQL on protected routes.
 - ADMIN authorization for user creation and PARTNER as the default role.
+- ADMIN user listing and profile lookup, with PARTNER limited to its own profile.
 - Login rate limiting and a configurable CORS allowlist.
 - Hourly cleanup of expired revoked tokens.
 - Centralized validation and error handling, including 413 payload responses.
@@ -199,6 +200,55 @@ Possible responses:
 - `401`: invalid credentials.
 - `429`: too many failed login attempts; the current limit is 10 failures per 15 minutes per client.
 
+### List all users
+
+```text
+GET /api/v1/users
+Authorization: Bearer <token>
+```
+
+Only ADMIN users can access this endpoint. The response contains `data.users`, ordered by `createdAt` from newest to oldest. Password hashes and token data are never included.
+
+Possible responses:
+
+- `200`: user list returned successfully.
+- `401`: missing, invalid, expired, or revoked token.
+- `403`: authenticated user is not an administrator.
+
+### Get the current authenticated user
+
+```text
+GET /api/v1/users/me
+Authorization: Bearer <token>
+```
+
+Available to both `ADMIN` and `PARTNER`. The response uses the same safe `data.user` structure and automatically reflects the role currently stored in PostgreSQL.
+
+Possible responses:
+
+- `200`: current user profile returned successfully.
+- `401`: missing, invalid, expired, or revoked token.
+
+### Get a user by ID
+
+```text
+GET /api/v1/users/:id
+Authorization: Bearer <token>
+```
+
+Access rules:
+
+- Only `ADMIN` can read arbitrary users through this endpoint.
+- `PARTNER` must use `GET /api/v1/users/me` to read its own profile.
+
+Possible responses:
+
+- `200`: user profile returned successfully.
+- `400 VALIDATION_ERROR`: `:id` is not a positive integer.
+- `401`: missing, invalid, expired, or revoked token.
+- `403 ADMIN_REQUIRED`: authenticated user is not an administrator.
+- `404 USER_NOT_FOUND`: ADMIN requested a nonexistent ID.
+
 ### Create a user
 
 ```text
@@ -284,16 +334,11 @@ Import:
 postman/homekeys-liberty-auth.postman_collection.json
 ```
 
-Then:
+The collection has a single `Login` request. Set `loginEmail`, `loginPassword`, and `newUserPassword` using local values, then run the requests in order. The collection adapts its assertions to the role returned by `Login`; use administrator credentials for management flows and partner credentials for authorization-denial flows.
 
-1. Set `adminEmail`, `adminPassword`, and `newUserPassword` using local values. The committed collection contains no real credentials.
-2. Run **Login administrator**. The test script stores the JWT in `accessToken`.
-3. Run the PARTNER and ADMIN user creation requests.
-4. Run **Login PARTNER** to store the partner token.
-5. Run **PARTNER cannot create PARTNER** and **PARTNER cannot create ADMIN**; both must return `403 ADMIN_REQUIRED`.
-6. Run **Logout PARTNER** and **Logout ADMIN** last.
+The role-specific scenarios are covered by `npm test`; the Postman collection intentionally keeps one login contract for frontend consumers.
 
-These requests create fictitious users in the target database. Run them only against a local development database and remove manual test data when necessary.
+These requests can create fictitious users in the target database. Run them only against a local development database and remove manual test data when necessary.
 
 ## Automated tests
 

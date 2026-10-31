@@ -44,8 +44,14 @@ interface DeleteRevokedTokensArgs {
   };
 }
 
+interface FindManyUsersArgs {
+  select?: Record<string, boolean>;
+  orderBy?: Array<Record<string, string>>;
+}
+
 interface UserDelegateMock {
   findUnique: (args: FindUserArgs) => Promise<User | null>;
+  findMany: (args: FindManyUsersArgs) => Promise<User[]>;
   create: (args: CreateUserArgs) => Promise<User>;
 }
 
@@ -61,6 +67,8 @@ export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
   getUserCreateCallCount: () => number;
+  getUserFindManyCallCount: () => number;
+  setEmptyUserList: () => void;
   failNextUserCreateWithDuplicateEmail: () => void;
 }
 
@@ -106,6 +114,8 @@ export const createMockDatabase = (): MockDatabase => {
   const revokedTokens: RevokedToken[] = [];
   let shouldFailNextUserCreate = false;
   let userCreateCallCount = 0;
+  let userFindManyCallCount = 0;
+  let shouldReturnEmptyUserList = false;
 
   const userDelegate = prisma.user as unknown as UserDelegateMock;
   const revokedTokenDelegate =
@@ -127,6 +137,16 @@ export const createMockDatabase = (): MockDatabase => {
     });
 
     return user ?? null;
+  };
+
+  userDelegate.findMany = async (_args: FindManyUsersArgs): Promise<User[]> => {
+    userFindManyCallCount += 1;
+
+    if (shouldReturnEmptyUserList) {
+      return [];
+    }
+
+    return users.map((user) => ({ ...user }));
   };
 
   userDelegate.create = async (args: CreateUserArgs): Promise<User> => {
@@ -200,6 +220,10 @@ export const createMockDatabase = (): MockDatabase => {
     users,
     revokedTokens,
     getUserCreateCallCount: (): number => userCreateCallCount,
+    getUserFindManyCallCount: (): number => userFindManyCallCount,
+    setEmptyUserList: (): void => {
+      shouldReturnEmptyUserList = true;
+    },
     failNextUserCreateWithDuplicateEmail: (): void => {
       shouldFailNextUserCreate = true;
     },

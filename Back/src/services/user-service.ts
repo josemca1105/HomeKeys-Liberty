@@ -1,7 +1,9 @@
 import { Prisma, Role } from "@prisma/client";
 import {
   createUserRecord,
+  findAllUsers,
   findUserByEmail,
+  findUserById,
 } from "../repositories/user-repository";
 import type { CreateUserInput, UserResponse } from "../types/user";
 import { AppError } from "../utils/app-error";
@@ -14,6 +16,27 @@ const duplicateEmailError = (): AppError => {
     code: "EMAIL_ALREADY_REGISTERED",
     message: "Ya existe un usuario registrado con ese correo.",
   });
+};
+
+export const listUsers = async (): Promise<UserResponse[]> => {
+  const users = await findAllUsers();
+  return users.map(toUserResponse);
+};
+
+export const getUserProfile = async (
+  userId: number,
+): Promise<UserResponse> => {
+  const user = await findUserById(userId);
+
+  if (!user) {
+    throw new AppError({
+      statusCode: 404,
+      code: "USER_NOT_FOUND",
+      message: "El usuario que intentas consultar no existe.",
+    });
+  }
+
+  return toUserResponse(user);
 };
 
 export const registerUser = async (

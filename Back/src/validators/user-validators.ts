@@ -5,6 +5,17 @@ const roleSchema = z.enum(["ADMIN", "PARTNER"], {
   error: "El rol debe ser ADMIN o PARTNER.",
 });
 
+export const userIdParamsSchema = z.object(
+  {
+    id: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(2147483647, "El ID del usuario debe ser un número entero positivo."),
+  },
+  { error: "El ID del usuario debe ser un número entero positivo." },
+);
+
 export const createUserSchema = z.object(
   {
     firstName: createRequiredStringSchema(

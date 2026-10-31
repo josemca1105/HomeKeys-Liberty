@@ -1,5 +1,21 @@
-import type { Role, User } from "@prisma/client";
+import type { Prisma, Role, User } from "@prisma/client";
 import { prisma } from "../config/database";
+
+const userResponseSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  photoUrl: true,
+  role: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.UserSelect;
+
+export type UserResponseRecord = Prisma.UserGetPayload<{
+  select: typeof userResponseSelect;
+}>;
 
 export interface CreateUserData {
   firstName: string;
@@ -25,6 +41,25 @@ export const findUserAuthorizationById = async (
   return prisma.user.findUnique({
     where: { id: userId },
     select: { id: true, role: true },
+  });
+};
+
+export const findAllUsers = async (): Promise<UserResponseRecord[]> => {
+  return prisma.user.findMany({
+    select: userResponseSelect,
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ],
+  });
+};
+
+export const findUserById = async (
+  userId: number,
+): Promise<UserResponseRecord | null> => {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: userResponseSelect,
   });
 };
 

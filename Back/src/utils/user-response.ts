@@ -1,7 +1,6 @@
-import type { User } from "@prisma/client";
 import type { UserResponse } from "../types/user";
 
-export const toUserResponse = (user: User): UserResponse => {
+export const toUserResponse = (user: UserResponse): UserResponse => {
   return {
     id: user.id,
     firstName: user.firstName,
