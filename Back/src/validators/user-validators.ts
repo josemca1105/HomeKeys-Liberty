@@ -35,7 +35,10 @@ export const createUserSchema = z.object(
       "La contraseña debe ser un texto.",
     )
       .min(8, "La contraseña debe tener al menos 8 caracteres.")
-      .max(72, "La contraseña no puede tener más de 72 caracteres."),
+      .max(72, "La contraseña no puede tener más de 72 caracteres.")
+      .refine((password) => Buffer.byteLength(password, "utf8") <= 72, {
+        message: "La contraseña no puede superar los 72 bytes en formato UTF-8.",
+      }),
     phone: createRequiredStringSchema(
       "El teléfono es obligatorio.",
       "El teléfono debe ser un texto.",

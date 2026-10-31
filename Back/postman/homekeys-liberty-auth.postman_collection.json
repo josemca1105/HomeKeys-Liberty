@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - Iteration 1 Auth",
-    "description": "Login, user creation, and logout tests. Set adminEmail, adminPassword, and newUserPassword before running the collection.",
+    "description": "Login, administrator-managed user creation, PARTNER authorization denial, and logout. Set adminEmail, adminPassword, and newUserPassword with local values before running. No real credentials are stored in this collection.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -32,6 +32,14 @@
       "value": ""
     },
     {
+      "key": "partnerEmail",
+      "value": ""
+    },
+    {
+      "key": "partnerToken",
+      "value": ""
+    },
+    {
       "key": "accessToken",
       "value": ""
     }
@@ -39,9 +47,6 @@
   "item": [
     {
       "name": "Login administrator",
-      "auth": {
-        "type": "noauth"
-      },
       "event": [
         {
           "listen": "test",
@@ -49,9 +54,11 @@
             "type": "text/javascript",
             "exec": [
               "const responseBody = pm.response.json();",
-              "pm.test('Login succeeds', function () {",
+              "pm.test('Administrator login succeeds', function () {",
               "    pm.response.to.have.status(200);",
               "    pm.expect(responseBody.success).to.eql(true);",
+              "    pm.expect(responseBody.data.user.role).to.eql('ADMIN');",
+              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
               "});",
               "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
               "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
@@ -68,6 +75,9 @@
             "value": "application/json"
           }
         ],
+        "auth": {
+          "type": "noauth"
+        },
         "body": {
           "mode": "raw",
           "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
@@ -78,6 +88,32 @@
     },
     {
       "name": "Create user with default PARTNER role",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const partnerEmail = 'partner-' + Date.now() + '@example.com';",
+              "pm.collectionVariables.set('partnerEmail', partnerEmail);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('PARTNER creation succeeds', function () {",
+              "    pm.response.to.have.status(201);",
+              "    pm.expect(responseBody.data.user.role).to.eql('PARTNER');",
+              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -88,7 +124,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"firstName\": \"Nuevo\",\n  \"lastName\": \"Asesor\",\n  \"email\": \"partner-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null\n}"
+          "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Partner\",\n  \"email\": \"{{partnerEmail}}\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null\n}"
         },
         "url": "{{baseUrl}}/users/add"
       },
@@ -96,6 +132,22 @@
     },
     {
       "name": "Create user with ADMIN role",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('ADMIN creation succeeds', function () {",
+              "    pm.response.to.have.status(201);",
+              "    pm.expect(responseBody.data.user.role).to.eql('ADMIN');",
+              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -106,14 +158,184 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"firstName\": \"Nuevo\",\n  \"lastName\": \"Administrador\",\n  \"email\": \"admin-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"ADMIN\"\n}"
+          "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Administrator\",\n  \"email\": \"admin-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"ADMIN\"\n}"
         },
         "url": "{{baseUrl}}/users/add"
       },
       "response": []
     },
     {
-      "name": "Logout",
+      "name": "Login PARTNER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('PARTNER login succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(responseBody.data.user.role).to.eql('PARTNER');",
+              "});",
+              "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
+              "    pm.collectionVariables.set('partnerToken', responseBody.data.token);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{partnerEmail}}\",\n  \"password\": \"{{newUserPassword}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "response": []
+    },
+    {
+      "name": "PARTNER cannot create PARTNER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('PARTNER is forbidden from creating a PARTNER', function () {",
+              "    pm.response.to.have.status(403);",
+              "    pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{partnerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Blocked\",\n  \"lastName\": \"Partner\",\n  \"email\": \"blocked-partner-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\"\n}"
+        },
+        "url": "{{baseUrl}}/users/add"
+      },
+      "response": []
+    },
+    {
+      "name": "PARTNER cannot create ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('PARTNER is forbidden from creating an ADMIN', function () {",
+              "    pm.response.to.have.status(403);",
+              "    pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{partnerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"Blocked\",\n  \"lastName\": \"Administrator\",\n  \"email\": \"blocked-admin-{{$timestamp}}@example.com\",\n  \"password\": \"{{newUserPassword}}\",\n  \"phone\": \"00000000\",\n  \"role\": \"ADMIN\"\n}"
+        },
+        "url": "{{baseUrl}}/users/add"
+      },
+      "response": []
+    },
+    {
+      "name": "Logout PARTNER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('PARTNER logout succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{partnerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/auth/logout"
+      },
+      "response": []
+    },
+    {
+      "name": "Logout ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ADMIN logout succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [],

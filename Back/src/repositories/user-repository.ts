@@ -19,6 +19,15 @@ export const findUserByEmail = async (
   });
 };
 
+export const findUserAuthorizationById = async (
+  userId: number,
+): Promise<Pick<User, "id" | "role"> | null> => {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true },
+  });
+};
+
 export const createUserRecord = async (
   userData: CreateUserData,
 ): Promise<User> => {

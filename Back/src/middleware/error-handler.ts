@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import type { ErrorRequestHandler, Response } from "express";
 import type { ErrorDetail } from "../utils/app-error";
 import { AppError } from "../utils/app-error";
@@ -18,12 +17,15 @@ const sendErrorResponse = (
   });
 };
 
-const isMalformedJsonError = (error: unknown): boolean => {
+const hasBodyParserErrorType = (
+  error: unknown,
+  errorType: string,
+): boolean => {
   return (
     typeof error === "object" &&
     error !== null &&
     "type" in error &&
-    error.type === "entity.parse.failed"
+    error.type === errorType
   );
 };
 
@@ -44,7 +46,7 @@ export const errorHandler: ErrorRequestHandler = (
     return;
   }
 
-  if (isMalformedJsonError(error)) {
+  if (hasBodyParserErrorType(error, "entity.parse.failed")) {
     sendErrorResponse(
       res,
       400,
@@ -54,15 +56,12 @@ export const errorHandler: ErrorRequestHandler = (
     return;
   }
 
-  if (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2002"
-  ) {
+  if (hasBodyParserErrorType(error, "entity.too.large")) {
     sendErrorResponse(
       res,
-      409,
-      "EMAIL_ALREADY_REGISTERED",
-      "Ya existe un usuario registrado con ese correo.",
+      413,
+      "PAYLOAD_TOO_LARGE",
+      "El cuerpo de la petición supera el tamaño máximo permitido.",
     );
     return;
   }

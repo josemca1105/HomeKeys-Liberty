@@ -14,6 +14,8 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Zod
 - JSON Web Tokens
 - bcrypt
+- express-rate-limit
+- Node.js test runner and Supertest
 
 ## Features
 
@@ -23,13 +25,17 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Spanish user-facing API messages.
 - Administrator seed with idempotent execution.
 - Secure password hashing with bcrypt and 12 salt rounds.
+- Bcrypt work for unknown emails to reduce login timing differences.
 - One-hour JWT access tokens.
 - JWT revocation through SHA-256 token hashes.
-- ADMIN authorization for user creation.
-- PARTNER as the default user role.
-- Centralized validation and error handling.
-- Helmet and CORS middleware.
-- Postman collection for the main authentication flows.
+- Current user and role revalidation against PostgreSQL on protected routes.
+- ADMIN authorization for user creation and PARTNER as the default role.
+- Login rate limiting and a configurable CORS allowlist.
+- Hourly cleanup of expired revoked tokens.
+- Centralized validation and error handling, including 413 payload responses.
+- Automated HTTP integration tests with isolated Prisma test doubles.
+- Helmet security headers.
+- Postman collection for the main authentication and authorization flows.
 
 ## Project structure
 
@@ -54,10 +60,15 @@ Back/
 │   ├── validators/
 │   ├── app.ts
 │   └── server.ts
+├── tests/
+│   ├── helpers/
+│   ├── auth.spec.ts
+│   └── security.spec.ts
 ├── .env.example
 ├── .gitignore
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+└── tsconfig.test.json
 ```
 
 ## Requirements
@@ -86,6 +97,7 @@ Configure these variables in `.env`:
 | `DATABASE_URL` | PostgreSQL connection string. |
 | `JWT_SECRET` | Random secret with at least 32 characters. |
 | `PORT` | HTTP port; normally `3000`. |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
 
 Connection string format:
 
@@ -153,7 +165,8 @@ The current physical database schema is entirely in English:
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start the development server with file watching. |
-| `npm run typecheck` | Run TypeScript checks without emitting files. |
+| `npm run typecheck` | Run TypeScript checks for production and test sources. |
+| `npm test` | Run the automated HTTP integration suite. |
 | `npm run build` | Compile the application into `dist`. |
 | `npm start` | Start the compiled application. |
 | `npm run prisma:generate` | Regenerate Prisma Client. |
@@ -184,6 +197,7 @@ Possible responses:
 - `200`: authenticated successfully.
 - `400`: invalid request body.
 - `401`: invalid credentials.
+- `429`: too many failed login attempts; the current limit is 10 failures per 15 minutes per client.
 
 ### Create a user
 
@@ -224,6 +238,14 @@ Possible responses:
 - `401`: missing, invalid, expired, or revoked token.
 - `403`: authenticated user is not an administrator.
 - `409`: email already registered.
+
+Additional security responses:
+
+- `403 CORS_ORIGIN_DENIED`: the browser origin is not present in `CORS_ORIGINS`.
+- `413 PAYLOAD_TOO_LARGE`: the JSON body exceeds 10 KB.
+- `401 INVALID_SESSION`: the token is valid, but its user no longer exists.
+
+Protected routes read the current role from PostgreSQL. Changing an administrator to PARTNER therefore removes administrative access even for JWTs issued before the role change.
 
 ### Logout
 
@@ -267,12 +289,25 @@ Then:
 1. Set `adminEmail`, `adminPassword`, and `newUserPassword` using local values. The committed collection contains no real credentials.
 2. Run **Login administrator**. The test script stores the JWT in `accessToken`.
 3. Run the PARTNER and ADMIN user creation requests.
-4. Run **Logout** last.
+4. Run **Login PARTNER** to store the partner token.
+5. Run **PARTNER cannot create PARTNER** and **PARTNER cannot create ADMIN**; both must return `403 ADMIN_REQUIRED`.
+6. Run **Logout PARTNER** and **Logout ADMIN** last.
+
+These requests create fictitious users in the target database. Run them only against a local development database and remove manual test data when necessary.
+
+## Automated tests
+
+```powershell
+npm test
+```
+
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL or require personal seed data. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, login rate limiting, bcrypt byte limits, payload limits, and expired-token cleanup.
 
 ## Verification commands
 
 ```powershell
 npm run typecheck
+npm test
 npm run build
 npx prisma validate
 npx prisma migrate status
@@ -311,4 +346,8 @@ This forces VSCode to use the generated Prisma Client and the TypeScript install
 - Change bootstrap passwords before deployment.
 - Password hashes and raw revoked tokens are never returned by the API.
 - Only SHA-256 token hashes are stored for logout revocation.
+- Expired revoked tokens are removed at startup and every hour.
+- Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
+- Login attempts are rate limited and browser origins are restricted by `CORS_ORIGINS`.
+- New passwords are limited to 72 UTF-8 bytes to prevent silent bcrypt truncation.
 - The `deepmerge-ts` npm override patches a transitive Prisma CLI vulnerability while preserving Prisma 6 compatibility. Re-run Prisma validation and `npm audit` before changing it.

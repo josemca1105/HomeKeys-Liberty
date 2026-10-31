@@ -23,3 +23,13 @@ export const revokeToken = async (
     data: tokenData,
   });
 };
+
+export const deleteExpiredRevokedTokens = async (
+  expiresBefore: Date,
+): Promise<number> => {
+  const result = await prisma.revokedToken.deleteMany({
+    where: { expiresAt: { lte: expiresBefore } },
+  });
+
+  return result.count;
+};

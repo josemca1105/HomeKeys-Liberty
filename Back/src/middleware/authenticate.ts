@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express";
 import { findRevokedTokenByHash } from "../repositories/revoked-token-repository";
+import { findUserAuthorizationById } from "../repositories/user-repository";
 import type { AuthTokenPayload } from "../types/auth";
 import { AppError } from "../utils/app-error";
 import { verifyAuthToken } from "../utils/jwt";
@@ -59,7 +60,10 @@ export const authenticate: RequestHandler = async (
       throw createSessionError();
     }
 
-    const revokedToken = await findRevokedTokenByHash(hashToken(token));
+    const [revokedToken, user] = await Promise.all([
+      findRevokedTokenByHash(hashToken(token)),
+      findUserAuthorizationById(tokenPayload.userId),
+    ]);
 
     if (revokedToken) {
       throw createSessionError(
@@ -68,8 +72,13 @@ export const authenticate: RequestHandler = async (
       );
     }
 
+    if (!user) {
+      throw createSessionError();
+    }
+
     req.auth = {
       ...tokenPayload,
+      role: user.role,
       token,
     };
     next();

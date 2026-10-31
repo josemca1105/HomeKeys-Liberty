@@ -1,9 +1,39 @@
 import { createApp } from "./app";
 import { prisma } from "./config/database";
 import { environment } from "./config/env";
+import { cleanupExpiredRevokedTokens } from "./services/token-cleanup-service";
+
+const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let isTokenCleanupRunning = false;
+
+const runRevokedTokenCleanup = async (): Promise<void> => {
+  if (isTokenCleanupRunning) {
+    return;
+  }
+
+  isTokenCleanupRunning = true;
+
+  try {
+    const deletedTokens = await cleanupExpiredRevokedTokens();
+
+    if (deletedTokens > 0) {
+      console.log(`Removed ${deletedTokens} expired revoked tokens.`);
+    }
+  } catch (error) {
+    console.error("Failed to clean up expired revoked tokens.", error);
+  } finally {
+    isTokenCleanupRunning = false;
+  }
+};
 
 const startServer = async (): Promise<void> => {
   await prisma.$connect();
+  await runRevokedTokenCleanup();
+
+  const cleanupInterval = setInterval((): void => {
+    void runRevokedTokenCleanup();
+  }, TOKEN_CLEANUP_INTERVAL_MS);
+  cleanupInterval.unref();
 
   const server = createApp().listen(environment.PORT, (): void => {
     console.log(`HomeKeys Liberty API listening on port ${environment.PORT}.`);
@@ -11,6 +41,7 @@ const startServer = async (): Promise<void> => {
 
   const shutdown = (signal: string): void => {
     console.log(`${signal} received. Closing the server.`);
+    clearInterval(cleanupInterval);
 
     server.close((): void => {
       void prisma

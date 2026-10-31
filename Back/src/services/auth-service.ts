@@ -7,6 +7,9 @@ import { comparePassword } from "../utils/password";
 import { hashToken } from "../utils/token";
 import { toUserResponse } from "../utils/user-response";
 
+const UNKNOWN_USER_PASSWORD_HASH =
+  "$2b$12$c5bNPxXBtehIL0a9c8W67.fi9qmn2dFVczisH05.6pv5ExgC7ydzO";
+
 const invalidCredentialsError = (): AppError => {
   return new AppError({
     statusCode: 401,
@@ -21,14 +24,10 @@ export const authenticateUser = async ({
   password,
 }: LoginInput): Promise<LoginResult> => {
   const user = await findUserByEmail(email);
+  const passwordHash = user?.passwordHash ?? UNKNOWN_USER_PASSWORD_HASH;
+  const isPasswordValid = await comparePassword(password, passwordHash);
 
-  if (!user) {
-    throw invalidCredentialsError();
-  }
-
-  const isPasswordValid = await comparePassword(password, user.passwordHash);
-
-  if (!isPasswordValid) {
+  if (!user || !isPasswordValid) {
     throw invalidCredentialsError();
   }
 
