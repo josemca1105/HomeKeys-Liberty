@@ -14,6 +14,7 @@ import {
 import type {
   ChangePasswordInput,
   CreateUserInput,
+  RegisterUserResult,
   UpdateUserInput,
   UserResponse,
   UserUpdateResult,
@@ -21,7 +22,11 @@ import type {
 } from "../types/user";
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
-import { comparePassword, hashPassword } from "../utils/password";
+import {
+  comparePassword,
+  generateTemporaryPassword,
+  hashPassword,
+} from "../utils/password";
 import { toUserResponse } from "../utils/user-response";
 
 const duplicateEmailError = (): AppError => {
@@ -98,14 +103,17 @@ export const getUserProfile = async (
 
 export const registerUser = async (
   input: CreateUserInput,
-): Promise<UserResponse> => {
+): Promise<RegisterUserResult> => {
   const existingUser = await findUserByEmail(input.email);
 
   if (existingUser) {
     throw duplicateEmailError();
   }
 
-  const passwordHash = await hashPassword(input.password);
+  const temporaryPassword =
+    input.password === undefined ? generateTemporaryPassword() : null;
+  const plainPassword = temporaryPassword ?? input.password ?? "";
+  const passwordHash = await hashPassword(plainPassword);
 
   try {
     const user = await createUserRecord({
@@ -118,7 +126,7 @@ export const registerUser = async (
       role: input.role ?? Role.PARTNER,
     });
 
-    return toUserResponse(user);
+    return { user: toUserResponse(user), temporaryPassword };
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

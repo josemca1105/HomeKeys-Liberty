@@ -183,7 +183,7 @@ const run = async (): Promise<void> => {
   const victimToken = await login(victimEmail, LIVE_PARTNER_PASSWORD);
   assert.ok(victimToken, "Live victim must be able to log in");
 
-  // 1. ADMIN creates a user through the API.
+  // 1. ADMIN creates a user through the API without an explicit password.
   const createResponse = await request(app)
     .post("/api/v1/users/add")
     .set("Authorization", `Bearer ${adminToken}`)
@@ -191,13 +191,15 @@ const run = async (): Promise<void> => {
       firstName: "Live",
       lastName: "Created",
       email: createdEmail.toUpperCase(),
-      password: LIVE_PARTNER_PASSWORD,
       phone: "00000000",
       photoUrl: null,
     });
 
   assert.equal(createResponse.status, 201);
   assertNoPasswordHash(createResponse.body);
+  const createdTemporaryPassword = createResponse.body.data
+    .temporaryPassword as string;
+  assert.equal(createdTemporaryPassword.length, 16);
   const createdUserId = createResponse.body.data.user.id as number;
   createdUserIds.push(createdUserId);
   assert.equal(createResponse.body.data.user.email, createdEmail);
@@ -228,14 +230,14 @@ const run = async (): Promise<void> => {
   assert.equal(duplicateResponse.body.code, "EMAIL_ALREADY_REGISTERED");
 
   // 4. The created user changes its own password and old sessions die.
-  const createdToken = await login(createdEmail, LIVE_PARTNER_PASSWORD);
+  const createdToken = await login(createdEmail, createdTemporaryPassword);
   assert.ok(createdToken);
 
   const changePasswordResponse = await request(app)
     .patch("/api/v1/users/me/password")
     .set("Authorization", `Bearer ${createdToken}`)
     .send({
-      currentPassword: LIVE_PARTNER_PASSWORD,
+      currentPassword: createdTemporaryPassword,
       newPassword: LIVE_CHANGED_PASSWORD,
     });
 
@@ -319,6 +321,40 @@ const run = async (): Promise<void> => {
   assert.equal(victimTokenRows, 0);
   assert.equal(victimResetRows, 0);
   assert.equal(agentResetRows, 1);
+
+  // 8. Password policy rejections on the three password entry points.
+  const weakCreateResponse = await request(app)
+    .post("/api/v1/users/add")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      firstName: "Live",
+      lastName: "Weak",
+      email: `live-weak-${LIVE_SUFFIX}@example.com`,
+      password: "abcdefgh1!",
+      phone: "00000000",
+    });
+
+  assert.equal(weakCreateResponse.status, 400);
+  assert.equal(weakCreateResponse.body.code, "VALIDATION_ERROR");
+
+  const weakChangeResponse = await request(app)
+    .patch("/api/v1/users/me/password")
+    .set("Authorization", `Bearer ${freshToken}`)
+    .send({
+      currentPassword: LIVE_CHANGED_PASSWORD,
+      newPassword: "abcdefgh1!",
+    });
+
+  assert.equal(weakChangeResponse.status, 400);
+  assert.equal(weakChangeResponse.body.code, "VALIDATION_ERROR");
+
+  const weakResetResponse = await request(app)
+    .patch(`/api/v1/users/${agentUser.id}`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ password: "abcdefgh1!" });
+
+  assert.equal(weakResetResponse.status, 400);
+  assert.equal(weakResetResponse.body.code, "VALIDATION_ERROR");
 };
 
 const main = async (): Promise<void> => {

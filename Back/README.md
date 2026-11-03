@@ -33,6 +33,8 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - ADMIN user listing and profile lookup, with PARTNER limited to its own profile.
 - ADMIN user editing and deletion with last-admin, self-deletion, and property-relation protections.
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
+- Automatic temporary password generation for administrator-created users, returned only once.
+- Password policy with four character classes on every password defined through the API.
 - Login rate limiting and a configurable CORS allowlist.
 - Hourly cleanup of expired revoked tokens.
 - Centralized validation and error handling, including 413 payload responses.
@@ -262,18 +264,21 @@ Authorization: Bearer <token>
 
 Only ADMIN users can access this endpoint.
 
-Example with the default PARTNER role:
+Example with the default PARTNER role and an automatically generated password:
 
 ```json
 {
   "firstName": "New",
   "lastName": "Partner",
   "email": "partner@example.com",
-  "password": "REPLACE_WITH_A_STRONG_PASSWORD",
   "phone": "00000000",
   "photoUrl": null
 }
 ```
+
+The `password` field is optional. When it is omitted, the API generates a random 16-character password and returns it once in `data.temporaryPassword`, next to `data.user`. Only its bcrypt hash is stored and the value cannot be retrieved again, so share it with the user through a secure channel and ask them to replace it with `PATCH /api/v1/users/me/password`.
+
+When `password` is sent explicitly, it must satisfy the password policy and `data.temporaryPassword` is not included in the response.
 
 To create another administrator, add:
 
@@ -287,7 +292,7 @@ The only accepted roles are `ADMIN` and `PARTNER`. If `role` is omitted, the API
 
 Possible responses:
 
-- `201`: user created successfully.
+- `201`: user created successfully; includes `data.temporaryPassword` when the password was generated.
 - `400`: validation error.
 - `401`: missing, invalid, expired, or revoked token.
 - `403`: authenticated user is not an administrator.
@@ -409,6 +414,19 @@ Authorization: Bearer <token>
 
 The API stores only the token's SHA-256 hash in `revoked_tokens`, together with its user ID and expiration date. Reusing the token after logout returns `401`.
 
+## Password policy
+
+Every password defined through the API must satisfy this policy:
+
+- At least 8 characters. There is no artificial upper cap; the technical limit is 72 UTF-8 bytes (bcrypt).
+- At least one uppercase letter, one lowercase letter, one number, and one special character (any punctuation mark or symbol).
+- Character classes are Unicode-aware: `ñ` and accented letters count as letters, not as special characters.
+- The new password cannot be equal to the current one on `PATCH /api/v1/users/me/password`.
+
+The policy applies wherever a password is defined: the optional `password` of `POST /users/add`, the `newPassword` of `PATCH /users/me/password`, and the administrator `password` reset of `PATCH /users/:id`. Violations return `400 VALIDATION_ERROR` with a field-level message.
+
+The policy is not retroactive: existing passwords keep working and are only replaced through a new change or reset. Generated temporary passwords always satisfy the policy. Example of a valid password: `Ejemplo#2026x`.
+
 ## Error responses
 
 Errors use a consistent structure:
@@ -518,6 +536,8 @@ It adds the nullable `users.password_changed_at` timestamp used as the session-i
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
 - Login attempts are rate limited and browser origins are restricted by `CORS_ORIGINS`.
 - New passwords are limited to 72 UTF-8 bytes to prevent silent bcrypt truncation.
+- Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are shown only once in the creation response, and are stored only as bcrypt hashes.
+- The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction.

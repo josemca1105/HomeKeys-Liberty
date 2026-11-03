@@ -16,12 +16,12 @@ import { asyncHandler } from "../utils/async-handler";
 
 export const addUser = asyncHandler(async (req, res): Promise<void> => {
   const userData = req.body as CreateUserInput;
-  const user = await registerUser(userData);
+  const { user, temporaryPassword } = await registerUser(userData);
 
   res.status(201).json({
     success: true,
     message: "Usuario registrado exitosamente.",
-    data: { user },
+    data: { user, ...(temporaryPassword ? { temporaryPassword } : {}) },
   });
 });
 

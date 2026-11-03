@@ -4,10 +4,15 @@ export interface CreateUserInput {
   firstName: string;
   lastName: string;
   email: string;
-  password: string;
+  password?: string;
   phone: string;
   photoUrl?: string | null;
   role?: Role;
+}
+
+export interface RegisterUserResult {
+  user: UserResponse;
+  temporaryPassword: string | null;
 }
 
 export interface UpdateUserInput {

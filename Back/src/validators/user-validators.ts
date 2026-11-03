@@ -20,6 +20,18 @@ const createPasswordSchema = (
     .max(72, "La contraseña no puede tener más de 72 caracteres.")
     .refine((password) => Buffer.byteLength(password, "utf8") <= 72, {
       message: "La contraseña no puede superar los 72 bytes en formato UTF-8.",
+    })
+    .refine((password) => /\p{Lu}/u.test(password), {
+      message: "La contraseña debe incluir al menos una letra mayúscula.",
+    })
+    .refine((password) => /\p{Ll}/u.test(password), {
+      message: "La contraseña debe incluir al menos una letra minúscula.",
+    })
+    .refine((password) => /\p{N}/u.test(password), {
+      message: "La contraseña debe incluir al menos un número.",
+    })
+    .refine((password) => /[\p{P}\p{S}]/u.test(password), {
+      message: "La contraseña debe incluir al menos un carácter especial.",
     });
 };
 
@@ -62,7 +74,7 @@ export const createUserSchema = z.object(
     password: createPasswordSchema(
       "La contraseña es obligatoria.",
       "La contraseña debe ser un texto.",
-    ),
+    ).optional(),
     phone: createRequiredStringSchema(
       "El teléfono es obligatorio.",
       "El teléfono debe ser un texto.",
