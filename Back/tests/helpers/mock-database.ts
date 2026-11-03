@@ -1,12 +1,16 @@
 import { Prisma, Role } from "@prisma/client";
-import type { RevokedToken, User } from "@prisma/client";
+import type { PasswordResetToken, RevokedToken, User } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { prisma } from "../../src/config/database";
-import type { CreateUserData } from "../../src/repositories/user-repository";
+import type {
+  CreateUserData,
+  UpdateUserData,
+} from "../../src/repositories/user-repository";
 
 export const TEST_ADMIN_PASSWORD = "Admin-Test-Password1!";
 export const TEST_PARTNER_PASSWORD = "Partner-Test-Password1!";
 export const TEST_NEW_USER_PASSWORD = "New-User-Test-Password1!";
+export const TEST_CHANGED_PASSWORD = "Changed-Test-Password1!";
 
 const ADMIN_PASSWORD_HASH = bcrypt.hashSync(TEST_ADMIN_PASSWORD, 4);
 const PARTNER_PASSWORD_HASH = bcrypt.hashSync(TEST_PARTNER_PASSWORD, 4);
@@ -20,6 +24,31 @@ interface FindUserArgs {
 
 interface CreateUserArgs {
   data: CreateUserData;
+}
+
+interface UpdateUserArgs {
+  where: {
+    id: number;
+  };
+  data: UpdateUserData;
+}
+
+interface DeleteUserArgs {
+  where: {
+    id: number;
+  };
+}
+
+interface CountUsersArgs {
+  where: {
+    role?: Role;
+  };
+}
+
+interface CountPropertiesArgs {
+  where: {
+    agentId: number;
+  };
 }
 
 interface FindRevokedTokenArgs {
@@ -41,6 +70,13 @@ interface DeleteRevokedTokensArgs {
     expiresAt?: {
       lte?: Date;
     };
+    userId?: number;
+  };
+}
+
+interface DeletePasswordResetTokensArgs {
+  where: {
+    userId: number;
   };
 }
 
@@ -53,6 +89,13 @@ interface UserDelegateMock {
   findUnique: (args: FindUserArgs) => Promise<User | null>;
   findMany: (args: FindManyUsersArgs) => Promise<User[]>;
   create: (args: CreateUserArgs) => Promise<User>;
+  update: (args: UpdateUserArgs) => Promise<User>;
+  delete: (args: DeleteUserArgs) => Promise<User>;
+  count: (args: CountUsersArgs) => Promise<number>;
+}
+
+interface PropertyDelegateMock {
+  count: (args: CountPropertiesArgs) => Promise<number>;
 }
 
 interface RevokedTokenDelegateMock {
@@ -63,13 +106,34 @@ interface RevokedTokenDelegateMock {
   deleteMany: (args: DeleteRevokedTokensArgs) => Promise<{ count: number }>;
 }
 
+interface PasswordResetTokenDelegateMock {
+  deleteMany: (
+    args: DeletePasswordResetTokensArgs,
+  ) => Promise<{ count: number }>;
+}
+
+interface TransactionClientMock {
+  user: UserDelegateMock;
+  property: PropertyDelegateMock;
+  revokedToken: RevokedTokenDelegateMock;
+  passwordResetToken: PasswordResetTokenDelegateMock;
+}
+
 export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
+  passwordResetTokens: PasswordResetToken[];
   getUserCreateCallCount: () => number;
   getUserFindManyCallCount: () => number;
   setEmptyUserList: () => void;
   failNextUserCreateWithDuplicateEmail: () => void;
+  addUser: (userData: {
+    id: number;
+    email: string;
+    role: Role;
+    password: string;
+  }) => User;
+  setAgentPropertyCount: (agentId: number, propertyCount: number) => void;
 }
 
 const createUser = (
@@ -89,6 +153,7 @@ const createUser = (
     role,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    passwordChangedAt: null,
   };
 };
 
@@ -96,12 +161,29 @@ export const createRevokedTokenFixture = (
   id: number,
   tokenHash: string,
   expiresAt: Date,
+  userId = 1,
 ): RevokedToken => {
   return {
     id,
     tokenHash,
-    userId: 1,
+    userId,
     expiresAt,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  };
+};
+
+export const createPasswordResetTokenFixture = (
+  id: number,
+  tokenHash: string,
+  userId: number,
+  expiresAt: Date,
+): PasswordResetToken => {
+  return {
+    id,
+    tokenHash,
+    userId,
+    expiresAt,
+    used: false,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   };
 };
@@ -112,18 +194,21 @@ export const createMockDatabase = (): MockDatabase => {
     createUser(2, "partner@example.com", Role.PARTNER, PARTNER_PASSWORD_HASH),
   ];
   const revokedTokens: RevokedToken[] = [];
+  const passwordResetTokens: PasswordResetToken[] = [];
+  const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
   let userCreateCallCount = 0;
   let userFindManyCallCount = 0;
   let shouldReturnEmptyUserList = false;
 
   const userDelegate = prisma.user as unknown as UserDelegateMock;
+  const propertyDelegate = prisma.property as unknown as PropertyDelegateMock;
   const revokedTokenDelegate =
     prisma.revokedToken as unknown as RevokedTokenDelegateMock;
+  const passwordResetTokenDelegate =
+    prisma.passwordResetToken as unknown as PasswordResetTokenDelegateMock;
 
-  userDelegate.findUnique = async (
-    args: FindUserArgs,
-  ): Promise<User | null> => {
+  const findUserRecord = (args: FindUserArgs): User | null => {
     const user = users.find((candidate) => {
       if (args.where.email !== undefined) {
         return candidate.email === args.where.email;
@@ -137,6 +222,12 @@ export const createMockDatabase = (): MockDatabase => {
     });
 
     return user ?? null;
+  };
+
+  userDelegate.findUnique = async (
+    args: FindUserArgs,
+  ): Promise<User | null> => {
+    return findUserRecord(args);
   };
 
   userDelegate.findMany = async (_args: FindManyUsersArgs): Promise<User[]> => {
@@ -176,6 +267,59 @@ export const createMockDatabase = (): MockDatabase => {
     return createdUser;
   };
 
+  userDelegate.update = async (args: UpdateUserArgs): Promise<User> => {
+    const user = users.find((candidate) => candidate.id === args.where.id);
+
+    if (!user) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    const duplicateEmailUser = users.find(
+      (candidate) =>
+        candidate.id !== user.id && candidate.email === args.data.email,
+    );
+
+    if (args.data.email !== undefined && duplicateEmailUser) {
+      throw new Prisma.PrismaClientKnownRequestError("Duplicate email", {
+        code: "P2002",
+        clientVersion: "6.19.3",
+        meta: { target: ["email"] },
+      });
+    }
+
+    Object.assign(user, args.data);
+    return { ...user };
+  };
+
+  userDelegate.delete = async (args: DeleteUserArgs): Promise<User> => {
+    const user = users.find((candidate) => candidate.id === args.where.id);
+
+    if (!user) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    users.splice(users.indexOf(user), 1);
+    return { ...user };
+  };
+
+  userDelegate.count = async (args: CountUsersArgs): Promise<number> => {
+    return users.filter(
+      (user) => args.where.role === undefined || user.role === args.where.role,
+    ).length;
+  };
+
+  propertyDelegate.count = async (
+    args: CountPropertiesArgs,
+  ): Promise<number> => {
+    return agentPropertyCounts.get(args.where.agentId) ?? 0;
+  };
+
   revokedTokenDelegate.findUnique = async (
     args: FindRevokedTokenArgs,
   ): Promise<Pick<RevokedToken, "id"> | null> => {
@@ -200,25 +344,72 @@ export const createMockDatabase = (): MockDatabase => {
   revokedTokenDelegate.deleteMany = async (
     args: DeleteRevokedTokensArgs,
   ): Promise<{ count: number }> => {
-    const expiresBefore = args.where.expiresAt?.lte;
-    const tokensToDelete = expiresBefore
-      ? revokedTokens.filter(
-          (token) => token.expiresAt.getTime() <= expiresBefore.getTime(),
-        )
-      : [...revokedTokens];
-    const remainingTokens = expiresBefore
-      ? revokedTokens.filter(
-          (token) => token.expiresAt.getTime() > expiresBefore.getTime(),
-        )
-      : [];
+    const matchesWhere = (token: RevokedToken): boolean => {
+      if (
+        args.where.userId !== undefined &&
+        token.userId !== args.where.userId
+      ) {
+        return false;
+      }
+
+      const expiresBefore = args.where.expiresAt?.lte;
+
+      if (
+        expiresBefore !== undefined &&
+        token.expiresAt.getTime() > expiresBefore.getTime()
+      ) {
+        return false;
+      }
+
+      return true;
+    };
+
+    const tokensToDelete = revokedTokens.filter(matchesWhere);
+    const remainingTokens = revokedTokens.filter(
+      (token) => !matchesWhere(token),
+    );
 
     revokedTokens.splice(0, revokedTokens.length, ...remainingTokens);
     return { count: tokensToDelete.length };
   };
 
+  passwordResetTokenDelegate.deleteMany = async (
+    args: DeletePasswordResetTokensArgs,
+  ): Promise<{ count: number }> => {
+    const tokensToDelete = passwordResetTokens.filter(
+      (token) => token.userId === args.where.userId,
+    );
+    const remainingTokens = passwordResetTokens.filter(
+      (token) => token.userId !== args.where.userId,
+    );
+
+    passwordResetTokens.splice(0, passwordResetTokens.length, ...remainingTokens);
+    return { count: tokensToDelete.length };
+  };
+
+  const transactionClient: TransactionClientMock = {
+    user: userDelegate,
+    property: propertyDelegate,
+    revokedToken: revokedTokenDelegate,
+    passwordResetToken: passwordResetTokenDelegate,
+  };
+
+  const prismaWithTransaction = prisma as unknown as {
+    $transaction: <T>(
+      fn: (transaction: TransactionClientMock) => Promise<T>,
+    ) => Promise<T>;
+  };
+
+  prismaWithTransaction.$transaction = async <T>(
+    fn: (transaction: TransactionClientMock) => Promise<T>,
+  ): Promise<T> => {
+    return fn(transactionClient);
+  };
+
   return {
     users,
     revokedTokens,
+    passwordResetTokens,
     getUserCreateCallCount: (): number => userCreateCallCount,
     getUserFindManyCallCount: (): number => userFindManyCallCount,
     setEmptyUserList: (): void => {
@@ -226,6 +417,24 @@ export const createMockDatabase = (): MockDatabase => {
     },
     failNextUserCreateWithDuplicateEmail: (): void => {
       shouldFailNextUserCreate = true;
+    },
+    addUser: ({
+      id,
+      email,
+      role,
+      password,
+    }: {
+      id: number;
+      email: string;
+      role: Role;
+      password: string;
+    }): User => {
+      const user = createUser(id, email, role, bcrypt.hashSync(password, 4));
+      users.push(user);
+      return user;
+    },
+    setAgentPropertyCount: (agentId: number, propertyCount: number): void => {
+      agentPropertyCounts.set(agentId, propertyCount);
     },
   };
 };

@@ -10,6 +10,31 @@ export interface CreateUserInput {
   role?: Role;
 }
 
+export interface UpdateUserInput {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  photoUrl?: string | null;
+  role?: Role;
+  password?: string;
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface UserUpdateResult {
+  user: UserResponse;
+  token: string | null;
+}
+
+export interface PasswordChangeResult {
+  user: UserResponse;
+  token: string;
+}
+
 export interface UserResponse {
   id: number;
   firstName: string;

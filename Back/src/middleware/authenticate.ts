@@ -76,6 +76,16 @@ export const authenticate: RequestHandler = async (
       throw createSessionError();
     }
 
+    if (
+      user.passwordChangedAt !== null &&
+      tokenPayload.issuedAt.getTime() < user.passwordChangedAt.getTime()
+    ) {
+      throw createSessionError(
+        "SESSION_INVALIDATED",
+        "Esta sesión ya no es válida porque la contraseña cambió. Inicia sesión nuevamente.",
+      );
+    }
+
     req.auth = {
       ...tokenPayload,
       role: user.role,

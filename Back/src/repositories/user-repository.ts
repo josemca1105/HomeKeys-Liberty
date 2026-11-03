@@ -27,6 +27,22 @@ export interface CreateUserData {
   role: Role;
 }
 
+export interface UpdateUserData {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  passwordHash?: string;
+  phone?: string;
+  photoUrl?: string | null;
+  role?: Role;
+  passwordChangedAt?: Date;
+}
+
+export type UserCredentialsRecord = Pick<
+  User,
+  "id" | "role" | "passwordHash" | "passwordChangedAt"
+>;
+
 export const findUserByEmail = async (
   email: string,
 ): Promise<User | null> => {
@@ -37,10 +53,24 @@ export const findUserByEmail = async (
 
 export const findUserAuthorizationById = async (
   userId: number,
-): Promise<Pick<User, "id" | "role"> | null> => {
+): Promise<Pick<User, "id" | "role" | "passwordChangedAt"> | null> => {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true },
+    select: { id: true, role: true, passwordChangedAt: true },
+  });
+};
+
+export const findUserCredentialsById = async (
+  userId: number,
+): Promise<UserCredentialsRecord | null> => {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      passwordHash: true,
+      passwordChangedAt: true,
+    },
   });
 };
 
@@ -68,5 +98,45 @@ export const createUserRecord = async (
 ): Promise<User> => {
   return prisma.user.create({
     data: userData,
+  });
+};
+
+export const updateUserRecord = async (
+  userId: number,
+  userData: UpdateUserData,
+): Promise<User> => {
+  return prisma.user.update({
+    where: { id: userId },
+    data: userData,
+  });
+};
+
+export const countUsersByRole = async (role: Role): Promise<number> => {
+  return prisma.user.count({
+    where: { role },
+  });
+};
+
+export const countPropertiesByAgentId = async (
+  agentId: number,
+): Promise<number> => {
+  return prisma.property.count({
+    where: { agentId },
+  });
+};
+
+export const deleteUserWithRelatedTokens = async (
+  userId: number,
+): Promise<void> => {
+  await prisma.$transaction(async (transaction) => {
+    await transaction.revokedToken.deleteMany({
+      where: { userId },
+    });
+    await transaction.passwordResetToken.deleteMany({
+      where: { userId },
+    });
+    await transaction.user.delete({
+      where: { id: userId },
+    });
   });
 };

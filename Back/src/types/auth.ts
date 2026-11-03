@@ -4,6 +4,7 @@ import type { UserResponse } from "./user";
 export interface AuthTokenPayload {
   userId: number;
   role: Role;
+  issuedAt: Date;
   expiresAt: Date;
 }
 
