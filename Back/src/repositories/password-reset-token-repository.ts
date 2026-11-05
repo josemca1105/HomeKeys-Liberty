@@ -48,7 +48,11 @@ export const applyPasswordReset = async (
   await prisma.$transaction(async (transaction) => {
     await transaction.user.update({
       where: { id: userId },
-      data: { passwordHash, passwordChangedAt },
+      data: {
+        passwordHash,
+        passwordChangedAt,
+        mustChangePassword: false,
+      },
     });
     await transaction.passwordResetToken.update({
       where: { id: tokenId },

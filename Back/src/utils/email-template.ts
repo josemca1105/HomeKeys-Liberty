@@ -189,3 +189,62 @@ export const renderPasswordResetEmail = (
 
   return { subject, ...rendered };
 };
+
+export interface InvitationEmailContent {
+  firstName: string;
+  activationUrl: string;
+  expirationHours: number;
+}
+
+export const renderInvitationEmail = (
+  content: InvitationEmailContent,
+): RenderedEmail & { subject: string } => {
+  const subject = "Bienvenido a HomeKeys Liberty - Activa tu cuenta";
+  const rendered = renderEmailLayout({
+    heading: "Bienvenido a HomeKeys Liberty",
+    greeting: `Hola ${content.firstName},`,
+    paragraphs: [
+      "Tu cuenta en HomeKeys Liberty fue creada. Para activarla, define tu contraseña personal presionando el botón.",
+      `El enlace es válido por ${content.expirationHours} horas y solo puede usarse una vez. Con tu contraseña definida, podrás iniciar sesión normalmente.`,
+    ],
+    action: {
+      label: "Activar mi cuenta",
+      url: content.activationUrl,
+      fallbackLabel:
+        "Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:",
+    },
+    notice:
+      "Si no esperabas este correo, puedes ignorarlo; no se creará ninguna contraseña hasta que actives tu cuenta.",
+  });
+
+  return { subject, ...rendered };
+};
+
+export interface PasswordResetNoticeEmailContent {
+  firstName: string;
+  loginUrl: string;
+}
+
+export const renderPasswordResetNoticeEmail = (
+  content: PasswordResetNoticeEmailContent,
+): RenderedEmail & { subject: string } => {
+  const subject = "Tu contraseña fue restablecida - HomeKeys Liberty";
+  const rendered = renderEmailLayout({
+    heading: "Tu contraseña fue restablecida",
+    greeting: `Hola ${content.firstName},`,
+    paragraphs: [
+      "Un administrador restableció la contraseña de tu cuenta en HomeKeys Liberty.",
+      "Por seguridad, deberás definir una contraseña nueva en tu próximo inicio de sesión antes de continuar usando el sistema.",
+    ],
+    action: {
+      label: "Iniciar sesión",
+      url: content.loginUrl,
+      fallbackLabel:
+        "Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:",
+    },
+    notice:
+      "Si no esperabas este cambio, contacta de inmediato a tu administrador.",
+  });
+
+  return { subject, ...rendered };
+};

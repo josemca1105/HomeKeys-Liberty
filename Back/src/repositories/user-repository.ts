@@ -9,6 +9,7 @@ const userResponseSelect = {
   phone: true,
   photoUrl: true,
   role: true,
+  mustChangePassword: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
@@ -25,6 +26,7 @@ export interface CreateUserData {
   phone: string;
   photoUrl: string | null;
   role: Role;
+  mustChangePassword: boolean;
 }
 
 export interface UpdateUserData {
@@ -36,6 +38,7 @@ export interface UpdateUserData {
   photoUrl?: string | null;
   role?: Role;
   passwordChangedAt?: Date;
+  mustChangePassword?: boolean;
 }
 
 export type UserCredentialsRecord = Pick<
@@ -53,10 +56,17 @@ export const findUserByEmail = async (
 
 export const findUserAuthorizationById = async (
   userId: number,
-): Promise<Pick<User, "id" | "role" | "passwordChangedAt"> | null> => {
+): Promise<
+  Pick<User, "id" | "role" | "passwordChangedAt" | "mustChangePassword"> | null
+> => {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, passwordChangedAt: true },
+    select: {
+      id: true,
+      role: true,
+      passwordChangedAt: true,
+      mustChangePassword: true,
+    },
   });
 };
 

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Role } from "@prisma/client";
 import type { Express } from "express";
 import bcrypt from "bcrypt";
 import request from "supertest";
 import { createApp } from "../src/app";
+import type { OutgoingMail } from "../src/utils/mailer";
+import { setMailSenderForTesting } from "../src/utils/mailer";
 import {
   createMockDatabase,
   TEST_ADMIN_PASSWORD,
@@ -31,10 +33,23 @@ const buildCreateUserPayload = (
 describe("Authentication and authorization HTTP integration", { concurrency: false }, () => {
   let app: Express;
   let database: MockDatabase;
+  let outbox: OutgoingMail[];
 
   beforeEach(() => {
     database = createMockDatabase();
     app = createApp();
+    outbox = [];
+
+    setMailSenderForTesting({
+      sendMail: async (options: OutgoingMail): Promise<unknown> => {
+        outbox.push(options);
+        return { accepted: [options.to] };
+      },
+    });
+  });
+
+  afterEach(() => {
+    setMailSenderForTesting(null);
   });
 
   const login = async (email: string, password: string): Promise<string> => {

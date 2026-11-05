@@ -5,7 +5,9 @@ import type { Transporter } from "nodemailer";
 import { environment } from "../config/env";
 import {
   EMAIL_LOGO_CID,
+  renderInvitationEmail,
   renderPasswordResetEmail,
+  renderPasswordResetNoticeEmail,
 } from "./email-template";
 
 export interface OutgoingMailAttachment {
@@ -81,22 +83,27 @@ export interface PasswordResetEmailData {
   expirationMinutes: number;
 }
 
-export const sendPasswordResetEmail = async ({
-  to,
-  firstName,
-  resetUrl,
-  expirationMinutes,
-}: PasswordResetEmailData): Promise<void> => {
+export interface InvitationEmailData {
+  to: string;
+  firstName: string;
+  activationUrl: string;
+  expirationHours: number;
+}
+
+export interface PasswordResetNoticeEmailData {
+  to: string;
+  firstName: string;
+  loginUrl: string;
+}
+
+const sendBrandedEmail = async (
+  to: string,
+  rendered: { subject: string; html: string; text: string },
+): Promise<void> => {
   const from =
     environment.SMTP_FROM !== ""
       ? environment.SMTP_FROM
       : environment.SMTP_USER;
-
-  const { subject, html, text } = renderPasswordResetEmail({
-    firstName,
-    resetUrl,
-    expirationMinutes,
-  });
 
   const logoPath = resolveLogoPath();
 
@@ -109,9 +116,9 @@ export const sendPasswordResetEmail = async ({
   await getMailSender().sendMail({
     from,
     to,
-    subject,
-    text,
-    html,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
     ...(logoPath
       ? {
           attachments: [
@@ -120,4 +127,39 @@ export const sendPasswordResetEmail = async ({
         }
       : {}),
   });
+};
+
+export const sendPasswordResetEmail = async ({
+  to,
+  firstName,
+  resetUrl,
+  expirationMinutes,
+}: PasswordResetEmailData): Promise<void> => {
+  await sendBrandedEmail(
+    to,
+    renderPasswordResetEmail({ firstName, resetUrl, expirationMinutes }),
+  );
+};
+
+export const sendInvitationEmail = async ({
+  to,
+  firstName,
+  activationUrl,
+  expirationHours,
+}: InvitationEmailData): Promise<void> => {
+  await sendBrandedEmail(
+    to,
+    renderInvitationEmail({ firstName, activationUrl, expirationHours }),
+  );
+};
+
+export const sendPasswordResetNoticeEmail = async ({
+  to,
+  firstName,
+  loginUrl,
+}: PasswordResetNoticeEmailData): Promise<void> => {
+  await sendBrandedEmail(
+    to,
+    renderPasswordResetNoticeEmail({ firstName, loginUrl }),
+  );
 };

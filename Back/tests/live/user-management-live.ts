@@ -15,6 +15,8 @@ import request from "supertest";
 import { Role } from "@prisma/client";
 import { createApp } from "../../src/app";
 import { prisma } from "../../src/config/database";
+import type { OutgoingMail } from "../../src/utils/mailer";
+import { setMailSenderForTesting } from "../../src/utils/mailer";
 import { hashPassword } from "../../src/utils/password";
 
 const LIVE_SUFFIX = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -23,8 +25,18 @@ const LIVE_PARTNER_PASSWORD = "Live-Partner-Password1!";
 const LIVE_CHANGED_PASSWORD = "Live-Changed-Password1!";
 
 const app: Express = createApp();
+const outbox: OutgoingMail[] = [];
 const createdUserIds: number[] = [];
 const createdPropertyIds: number[] = [];
+
+// Capture-only sender: temporary users use fake addresses, so nothing is
+// really delivered during this check.
+setMailSenderForTesting({
+  sendMail: async (options: OutgoingMail): Promise<unknown> => {
+    outbox.push(options);
+    return { accepted: [options.to] };
+  },
+});
 
 const cleanup = async (): Promise<void> => {
   if (createdPropertyIds.length > 0) {
@@ -183,7 +195,7 @@ const run = async (): Promise<void> => {
   const victimToken = await login(victimEmail, LIVE_PARTNER_PASSWORD);
   assert.ok(victimToken, "Live victim must be able to log in");
 
-  // 1. ADMIN creates a user through the API without an explicit password.
+  // 1. ADMIN creates a user through the API; the invitation arrives by email.
   const createResponse = await request(app)
     .post("/api/v1/users/add")
     .set("Authorization", `Bearer ${adminToken}`)
@@ -197,12 +209,27 @@ const run = async (): Promise<void> => {
 
   assert.equal(createResponse.status, 201);
   assertNoPasswordHash(createResponse.body);
-  const createdTemporaryPassword = createResponse.body.data
-    .temporaryPassword as string;
-  assert.equal(createdTemporaryPassword.length, 16);
+  assert.equal(createResponse.body.data.invitationSent, true);
+  assert.equal("temporaryPassword" in createResponse.body.data, false);
+  assert.equal(createResponse.body.data.user.mustChangePassword, true);
   const createdUserId = createResponse.body.data.user.id as number;
   createdUserIds.push(createdUserId);
   assert.equal(createResponse.body.data.user.email, createdEmail);
+
+  // The activation link defines the initial personal password.
+  const invitationMail = outbox[outbox.length - 1];
+  assert.ok(invitationMail);
+  const activationTokenMatch = /token=([0-9a-f]{64})/.exec(
+    invitationMail.text,
+  );
+  assert.ok(activationTokenMatch);
+  const activationResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({
+      token: activationTokenMatch[1],
+      newPassword: LIVE_PARTNER_PASSWORD,
+    });
+  assert.equal(activationResponse.status, 200);
 
   // 2. ADMIN edits every editable field of the created user.
   const updateResponse = await request(app)
@@ -230,14 +257,14 @@ const run = async (): Promise<void> => {
   assert.equal(duplicateResponse.body.code, "EMAIL_ALREADY_REGISTERED");
 
   // 4. The created user changes its own password and old sessions die.
-  const createdToken = await login(createdEmail, createdTemporaryPassword);
+  const createdToken = await login(createdEmail, LIVE_PARTNER_PASSWORD);
   assert.ok(createdToken);
 
   const changePasswordResponse = await request(app)
     .patch("/api/v1/users/me/password")
     .set("Authorization", `Bearer ${createdToken}`)
     .send({
-      currentPassword: createdTemporaryPassword,
+      currentPassword: LIVE_PARTNER_PASSWORD,
       newPassword: LIVE_CHANGED_PASSWORD,
     });
 

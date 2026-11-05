@@ -64,6 +64,9 @@ model User {
   // Security boundary: JWTs issued before this instant are rejected.
   passwordChangedAt DateTime? @map("password_changed_at")
 
+  // When true, the user must define a new password before using the API again.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+
   properties Property[]
 
   @@map("users")

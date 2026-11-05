@@ -1,4 +1,5 @@
 import { Prisma, Role } from "@prisma/client";
+import { environment } from "../config/env";
 import {
   countPropertiesByAgentId,
   countUsersByRole,
@@ -11,6 +12,10 @@ import {
   updateUserRecord,
   type UpdateUserData,
 } from "../repositories/user-repository";
+import {
+  INVITATION_TOKEN_TTL_MINUTES,
+  issuePasswordResetToken,
+} from "../services/password-reset-service";
 import type {
   ChangePasswordInput,
   CreateUserInput,
@@ -22,6 +27,10 @@ import type {
 } from "../types/user";
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
+import {
+  sendInvitationEmail,
+  sendPasswordResetNoticeEmail,
+} from "../utils/mailer";
 import {
   comparePassword,
   generateTemporaryPassword,
@@ -101,6 +110,29 @@ export const getUserProfile = async (
   return toUserResponse(user);
 };
 
+const sendInvitation = async (user: UserResponse): Promise<boolean> => {
+  try {
+    const activationToken = await issuePasswordResetToken(
+      user.id,
+      INVITATION_TOKEN_TTL_MINUTES,
+    );
+
+    await sendInvitationEmail({
+      to: user.email,
+      firstName: user.firstName,
+      activationUrl: `${environment.PASSWORD_RESET_BASE_URL}?token=${activationToken}`,
+      expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
+    });
+
+    return true;
+  } catch (error) {
+    // The account is created regardless; the ADMIN can resend the link later
+    // through the password recovery flow.
+    console.error("Failed to send the invitation email.", error);
+    return false;
+  }
+};
+
 export const registerUser = async (
   input: CreateUserInput,
 ): Promise<RegisterUserResult> => {
@@ -110,13 +142,15 @@ export const registerUser = async (
     throw duplicateEmailError();
   }
 
-  const temporaryPassword =
-    input.password === undefined ? generateTemporaryPassword() : null;
-  const plainPassword = temporaryPassword ?? input.password ?? "";
-  const passwordHash = await hashPassword(plainPassword);
+  // The initial password is never disclosed: the account is activated through
+  // the invitation link sent to the new user's email.
+  const initialPassword = input.password ?? generateTemporaryPassword();
+  const passwordHash = await hashPassword(initialPassword);
+
+  let user;
 
   try {
-    const user = await createUserRecord({
+    user = await createUserRecord({
       firstName: input.firstName,
       lastName: input.lastName,
       email: input.email,
@@ -124,9 +158,8 @@ export const registerUser = async (
       phone: input.phone,
       photoUrl: input.photoUrl ?? null,
       role: input.role ?? Role.PARTNER,
+      mustChangePassword: true,
     });
-
-    return { user: toUserResponse(user), temporaryPassword };
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -137,6 +170,11 @@ export const registerUser = async (
 
     throw error;
   }
+
+  const safeUser = toUserResponse(user);
+  const invitationSent = await sendInvitation(safeUser);
+
+  return { user: safeUser, invitationSent };
 };
 
 export const changeOwnPassword = async (
@@ -161,6 +199,7 @@ export const changeOwnPassword = async (
   const updatedUser = await updateUserRecord(userId, {
     passwordHash: await hashPassword(input.newPassword),
     passwordChangedAt: passwordChangeTimestamp(),
+    mustChangePassword: false,
   });
 
   return {
@@ -215,12 +254,25 @@ export const updateUserByAdmin = async (
   if (input.password !== undefined) {
     updateData.passwordHash = await hashPassword(input.password);
     updateData.passwordChangedAt = passwordChangeTimestamp();
+    updateData.mustChangePassword = true;
   }
 
   try {
     const updatedUser = await updateUserRecord(targetUserId, updateData);
     const isOwnPasswordChange =
       isChangingPassword && targetUserId === actingUserId;
+
+    if (isChangingPassword) {
+      try {
+        await sendPasswordResetNoticeEmail({
+          to: updatedUser.email,
+          firstName: updatedUser.firstName,
+          loginUrl: environment.APP_BASE_URL,
+        });
+      } catch (error) {
+        console.error("Failed to send the password reset notice email.", error);
+      }
+    }
 
     return {
       user: toUserResponse(updatedUser),

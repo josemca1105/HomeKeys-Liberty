@@ -90,6 +90,7 @@ export const authenticate: RequestHandler = async (
       ...tokenPayload,
       role: user.role,
       token,
+      mustChangePassword: user.mustChangePassword,
     };
     next();
   } catch (error) {

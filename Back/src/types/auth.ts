@@ -10,6 +10,7 @@ export interface AuthTokenPayload {
 
 export interface AuthSession extends AuthTokenPayload {
   token: string;
+  mustChangePassword: boolean;
 }
 
 export interface LoginInput {

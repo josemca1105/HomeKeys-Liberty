@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Role } from "@prisma/client";
 import type { Express } from "express";
 import request from "supertest";
 import { createApp } from "../src/app";
+import type { OutgoingMail } from "../src/utils/mailer";
+import { setMailSenderForTesting } from "../src/utils/mailer";
 import {
   createMockDatabase,
   TEST_ADMIN_PASSWORD,
+  TEST_CHANGED_PASSWORD,
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
@@ -41,10 +44,23 @@ const INVALID_PASSWORD_CASES = [
 describe("Password policy HTTP integration", { concurrency: false }, () => {
   let app: Express;
   let database: MockDatabase;
+  let outbox: OutgoingMail[];
 
   beforeEach(() => {
     database = createMockDatabase();
     app = createApp();
+    outbox = [];
+
+    setMailSenderForTesting({
+      sendMail: async (options: OutgoingMail): Promise<unknown> => {
+        outbox.push(options);
+        return { accepted: [options.to] };
+      },
+    });
+  });
+
+  afterEach(() => {
+    setMailSenderForTesting(null);
   });
 
   const login = async (email: string, password: string): Promise<string> => {
@@ -86,79 +102,153 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     );
   };
 
-  it("generates a temporary password when ADMIN creates a user without one", async () => {
+  it("creates a user without password and sends an activation invitation", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const response = await request(app)
       .post("/api/v1/users/add")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send(createUserPayload("generated@example.com"));
+      .send(createUserPayload("invited@example.com"));
 
     assert.equal(response.status, 201);
     assert.equal("passwordHash" in response.body.data.user, false);
+    assert.equal("temporaryPassword" in response.body.data, false);
+    assert.equal(response.body.data.invitationSent, true);
+    assert.equal(response.body.data.user.mustChangePassword, true);
 
-    const temporaryPassword = response.body.data.temporaryPassword as string;
-    assert.equal(typeof temporaryPassword, "string");
-    assert.equal(temporaryPassword.length, 16);
-    assert.equal(/\p{Lu}/u.test(temporaryPassword), true);
-    assert.equal(/\p{Ll}/u.test(temporaryPassword), true);
-    assert.equal(/\p{N}/u.test(temporaryPassword), true);
-    assert.equal(/[\p{P}\p{S}]/u.test(temporaryPassword), true);
-    assert.equal(/[0Ol1]/.test(temporaryPassword), false);
+    // The invitation email carries a one-time activation link and never the
+    // initial password.
+    assert.equal(outbox.length, 1);
+    const mail = outbox[0];
+    assert.ok(mail);
+    assert.equal(mail.to, "invited@example.com");
+    assert.equal(
+      mail.subject,
+      "Bienvenido a HomeKeys Liberty - Activa tu cuenta",
+    );
+    assert.equal(mail.html.includes("Activar mi cuenta"), true);
+    assert.equal(mail.text.includes("24 horas"), true);
+    assert.equal(/token=([0-9a-f]{64})/.test(mail.text), true);
+    assert.equal(mail.html.includes("passwordHash"), false);
 
     const createdUser = database.users.find(
-      (user) => user.email === "generated@example.com",
+      (user) => user.email === "invited@example.com",
     );
     assert.ok(createdUser);
     assert.equal(createdUser.passwordHash.startsWith("$2"), true);
-    assert.notEqual(createdUser.passwordHash, temporaryPassword);
+    assert.equal(createdUser.mustChangePassword, true);
 
-    const generatedToken = await login(
-      "generated@example.com",
-      temporaryPassword,
+    // The user defines a personal password through the activation link.
+    const tokenMatch = /token=([0-9a-f]{64})/.exec(mail.text);
+    assert.ok(tokenMatch);
+    const activationToken = tokenMatch[1] as string;
+
+    const activationResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: activationToken, newPassword: TEST_CHANGED_PASSWORD });
+
+    assert.equal(activationResponse.status, 200);
+
+    const sessionToken = await login(
+      "invited@example.com",
+      TEST_CHANGED_PASSWORD,
     );
-    assert.equal(typeof generatedToken, "string");
+    const profileResponse = await request(app)
+      .get("/api/v1/users/me")
+      .set("Authorization", `Bearer ${sessionToken}`);
+
+    assert.equal(profileResponse.status, 200);
+    assert.equal(profileResponse.body.data.user.mustChangePassword, false);
   });
 
-  it("generates a different temporary password on every creation", async () => {
+  it("issues a different activation token for every creation", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const firstResponse = await request(app)
       .post("/api/v1/users/add")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send(createUserPayload("first-generated@example.com"));
+      .send(createUserPayload("first-invited@example.com"));
     const secondResponse = await request(app)
       .post("/api/v1/users/add")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send(createUserPayload("second-generated@example.com"));
+      .send(createUserPayload("second-invited@example.com"));
 
     assert.equal(firstResponse.status, 201);
     assert.equal(secondResponse.status, 201);
-    assert.notEqual(
-      firstResponse.body.data.temporaryPassword,
-      secondResponse.body.data.temporaryPassword,
-    );
+    assert.equal(outbox.length, 2);
+
+    const firstToken = /token=([0-9a-f]{64})/.exec(outbox[0]?.text ?? "");
+    const secondToken = /token=([0-9a-f]{64})/.exec(outbox[1]?.text ?? "");
+    assert.ok(firstToken);
+    assert.ok(secondToken);
+    assert.notEqual(firstToken[1], secondToken[1]);
   });
 
-  it("keeps the explicit password flow without returning a temporary password", async () => {
+  it("keeps the explicit password flow and forces a password change", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const response = await request(app)
       .post("/api/v1/users/add")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send(
-        createUserPayload("explicit@example.com", TEST_PARTNER_PASSWORD),
-      );
+      .send({
+        ...createUserPayload("explicit@example.com", TEST_PARTNER_PASSWORD),
+        role: Role.ADMIN,
+      });
 
     assert.equal(response.status, 201);
     assert.equal("temporaryPassword" in response.body.data, false);
     assert.equal("passwordHash" in response.body.data.user, false);
+    assert.equal(response.body.data.invitationSent, true);
 
-    const explicitToken = await login(
+    // The explicit password is known only by the ADMIN: it never travels by
+    // email, while the invitation still includes the activation link.
+    assert.equal(outbox.length, 1);
+    const mail = outbox[0];
+    assert.ok(mail);
+    assert.equal(mail.html.includes(TEST_PARTNER_PASSWORD), false);
+    assert.equal(mail.text.includes(TEST_PARTNER_PASSWORD), false);
+    assert.equal(mail.html.includes("Activar mi cuenta"), true);
+
+    // Logging in with the ADMIN-defined password works, but the user is
+    // forced to define a personal one before using the rest of the API.
+    const sessionToken = await login(
       "explicit@example.com",
       TEST_PARTNER_PASSWORD,
     );
-    assert.equal(typeof explicitToken, "string");
+
+    const loginResponse = await request(app)
+      .post("/api/v1/auth/login")
+      .send({
+        email: "explicit@example.com",
+        password: TEST_PARTNER_PASSWORD,
+      });
+    assert.equal(loginResponse.body.data.user.mustChangePassword, true);
+
+    const blockedResponse = await request(app)
+      .get("/api/v1/users")
+      .set("Authorization", `Bearer ${sessionToken}`);
+    assert.equal(blockedResponse.status, 403);
+    assert.equal(blockedResponse.body.code, "PASSWORD_CHANGE_REQUIRED");
+
+    const changeResponse = await request(app)
+      .patch("/api/v1/users/me/password")
+      .set("Authorization", `Bearer ${sessionToken}`)
+      .send({
+        currentPassword: TEST_PARTNER_PASSWORD,
+        newPassword: TEST_CHANGED_PASSWORD,
+      });
+
+    assert.equal(changeResponse.status, 200);
+    assert.equal(
+      changeResponse.body.data.user.mustChangePassword,
+      false,
+    );
+
+    const freshToken = changeResponse.body.data.token as string;
+    const restoredResponse = await request(app)
+      .get("/api/v1/users")
+      .set("Authorization", `Bearer ${freshToken}`);
+    assert.equal(restoredResponse.status, 200);
   });
 
   it("enforces the password policy on user creation", async () => {

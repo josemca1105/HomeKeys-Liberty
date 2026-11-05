@@ -49,6 +49,7 @@ const environmentSchema = z.object({
   PASSWORD_RESET_BASE_URL: z
     .string()
     .default("http://localhost:5173/reset-password"),
+  APP_BASE_URL: z.string().default("http://localhost:5173"),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

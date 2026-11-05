@@ -9,6 +9,7 @@ import {
   updateUser,
 } from "../controllers/user-controller";
 import { authenticate } from "../middleware/authenticate";
+import { enforcePasswordChange } from "../middleware/enforce-password-change";
 import { isAdmin } from "../middleware/is-admin";
 import { validateParams } from "../middleware/validate-params";
 import { validateRequest } from "../middleware/validate-request";
@@ -24,12 +25,13 @@ export const userRoutes = Router();
 userRoutes.post(
   "/add",
   authenticate,
+  enforcePasswordChange,
   isAdmin,
   validateRequest(createUserSchema),
   addUser,
 );
 
-userRoutes.get("/", authenticate, isAdmin, getUsers);
+userRoutes.get("/", authenticate, enforcePasswordChange, isAdmin, getUsers);
 userRoutes.get("/me", authenticate, getCurrentUser);
 
 userRoutes.patch(
@@ -42,6 +44,7 @@ userRoutes.patch(
 userRoutes.patch(
   "/:id",
   authenticate,
+  enforcePasswordChange,
   isAdmin,
   validateParams(userIdParamsSchema),
   validateRequest(updateUserSchema),
@@ -51,6 +54,7 @@ userRoutes.patch(
 userRoutes.delete(
   "/:id",
   authenticate,
+  enforcePasswordChange,
   isAdmin,
   validateParams(userIdParamsSchema),
   removeUser,
@@ -59,6 +63,7 @@ userRoutes.delete(
 userRoutes.get(
   "/:id",
   authenticate,
+  enforcePasswordChange,
   isAdmin,
   validateParams(userIdParamsSchema),
   getUserById,

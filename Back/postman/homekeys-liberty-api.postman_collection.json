@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - API",
-    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId and the generated password in createdUserPassword), Update user, Delete user, Change my password, Logout. Create user omits the password so the API generates a temporary one, returned once in data.temporaryPassword; to set an explicit password instead, include it in the body (it must satisfy the password policy: 8+ characters with uppercase, lowercase, number and special character). Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.",
+    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Delete user, Change my password, Logout. Create user sends a welcome email with a single-use activation link so the new user defines a personal password; the response returns invitationSent and no passwords (data.user.mustChangePassword stays true until the user changes it, and management routes answer 403 PASSWORD_CHANGE_REQUIRED meanwhile). Explicit passwords in the body must satisfy the password policy and are never emailed. Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -29,10 +29,6 @@
     },
     {
       "key": "newUserPassword",
-      "value": ""
-    },
-    {
-      "key": "createdUserPassword",
       "value": ""
     },
     {
@@ -211,14 +207,13 @@
               "        pm.expect(responseBody.data.user.role).to.eql('PARTNER');",
               "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
               "    });",
-              "    pm.test('ADMIN receives a generated temporary password', function () {",
-              "        pm.expect(responseBody.data.temporaryPassword).to.be.a('string').and.have.lengthOf(16);",
+              "    pm.test('ADMIN triggers an invitation email', function () {",
+              "        pm.expect(responseBody.data.invitationSent).to.eql(true);",
+              "        pm.expect(responseBody.data).to.not.have.property('temporaryPassword');",
+              "        pm.expect(responseBody.data.user.mustChangePassword).to.eql(true);",
               "    });",
               "    if (pm.response.code === 201 && responseBody.data && responseBody.data.user) {",
               "        pm.collectionVariables.set('targetUserId', String(responseBody.data.user.id));",
-              "        if (responseBody.data.temporaryPassword) {",
-              "            pm.collectionVariables.set('createdUserPassword', responseBody.data.temporaryPassword);",
-              "        }",
               "    }",
               "} else {",
               "    pm.test('PARTNER cannot create a user', function () {",

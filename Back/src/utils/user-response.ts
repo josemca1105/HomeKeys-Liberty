@@ -9,6 +9,7 @@ export const toUserResponse = (user: UserResponse): UserResponse => {
     phone: user.phone,
     photoUrl: user.photoUrl,
     role: user.role,
+    mustChangePassword: user.mustChangePassword,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

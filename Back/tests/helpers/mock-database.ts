@@ -187,6 +187,7 @@ const createUser = (
     phone: "00000000",
     photoUrl: null,
     role,
+    mustChangePassword: false,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     passwordChangedAt: null,
@@ -299,6 +300,7 @@ export const createMockDatabase = (): MockDatabase => {
     createdUser.lastName = args.data.lastName;
     createdUser.phone = args.data.phone;
     createdUser.photoUrl = args.data.photoUrl;
+    createdUser.mustChangePassword = args.data.mustChangePassword;
     users.push(createdUser);
     return createdUser;
   };

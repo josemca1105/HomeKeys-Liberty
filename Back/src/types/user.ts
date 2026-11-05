@@ -12,7 +12,7 @@ export interface CreateUserInput {
 
 export interface RegisterUserResult {
   user: UserResponse;
-  temporaryPassword: string | null;
+  invitationSent: boolean;
 }
 
 export interface UpdateUserInput {
@@ -48,6 +48,7 @@ export interface UserResponse {
   phone: string;
   photoUrl: string | null;
   role: Role;
+  mustChangePassword: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
