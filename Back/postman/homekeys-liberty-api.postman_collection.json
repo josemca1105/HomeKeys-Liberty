@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - API",
-    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId and the generated password in createdUserPassword), Update user, Delete user, Change my password, Logout. Create user omits the password so the API generates a temporary one, returned once in data.temporaryPassword; to set an explicit password instead, include it in the body (it must satisfy the password policy: 8+ characters with uppercase, lowercase, number and special character). Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.",
+    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId and the generated password in createdUserPassword), Update user, Delete user, Change my password, Logout. Create user omits the password so the API generates a temporary one, returned once in data.temporaryPassword; to set an explicit password instead, include it in the body (it must satisfy the password policy: 8+ characters with uppercase, lowercase, number and special character). Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -33,6 +33,10 @@
     },
     {
       "key": "createdUserPassword",
+      "value": ""
+    },
+    {
+      "key": "resetToken",
       "value": ""
     },
     {
@@ -413,6 +417,92 @@
           "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
         },
         "url": "{{baseUrl}}/users/me/password"
+      },
+      "response": []
+    },
+    {
+      "name": "Forgot password",
+      "auth": {
+        "type": "noauth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('Forgot password answers generically', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(responseBody.message).to.eql('Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.');",
+              "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+              "});",
+              "pm.test('Forgot password leaks no user data', function () {",
+              "    pm.expect(responseBody.data).to.eql({});",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{loginEmail}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/forgot-password"
+      },
+      "response": []
+    },
+    {
+      "name": "Reset password",
+      "auth": {
+        "type": "noauth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const responseBody = pm.response.json();",
+              "pm.test('Reset password succeeds', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(responseBody.message).to.eql('Contraseña restablecida exitosamente.');",
+              "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+              "});",
+              "if (pm.response.code === 200) {",
+              "    pm.collectionVariables.set('loginPassword', pm.collectionVariables.get('newUserPassword'));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/reset-password"
       },
       "response": []
     },

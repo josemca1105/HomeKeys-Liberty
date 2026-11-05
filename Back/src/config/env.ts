@@ -37,6 +37,18 @@ const environmentSchema = z.object({
     .refine(hasOnlyValidCorsOrigins, {
       message: "CORS_ORIGINS must contain valid comma-separated URLs.",
     }),
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
+  SMTP_SECURE: z
+    .string()
+    .default("true")
+    .transform((value) => value.toLowerCase() === "true"),
+  SMTP_USER: z.string().default(""),
+  SMTP_APP_PASSWORD: z.string().default(""),
+  SMTP_FROM: z.string().default(""),
+  PASSWORD_RESET_BASE_URL: z
+    .string()
+    .default("http://localhost:5173/reset-password"),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
@@ -47,6 +59,15 @@ if (!parsedEnvironment.success) {
     parsedEnvironment.error.flatten().fieldErrors,
   );
   throw new Error("Invalid environment configuration.");
+}
+
+if (
+  parsedEnvironment.data.SMTP_USER === "" ||
+  parsedEnvironment.data.SMTP_APP_PASSWORD === ""
+) {
+  console.warn(
+    "SMTP is not configured; password recovery emails will not be sent.",
+  );
 }
 
 export const environment = parsedEnvironment.data;

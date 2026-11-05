@@ -2,7 +2,7 @@
 
 Backend API for **HomeKeys Liberty**, built with Node.js, Express, TypeScript, PostgreSQL, and Prisma ORM.
 
-Iteration 1 includes the backend foundation, database migrations, administrator seed, JWT authentication, token revocation, and administrator-managed user creation. This iteration adds user editing, self-service password changes, and administrator-managed user deletion.
+Iteration 1 includes the backend foundation, database migrations, administrator seed, JWT authentication, token revocation, and administrator-managed user creation. This iteration adds user editing, self-service password changes, administrator-managed user deletion, and email-based password recovery.
 
 ## Tech stack
 
@@ -35,6 +35,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
 - Automatic temporary password generation for administrator-created users, returned only once.
 - Password policy with four character classes on every password defined through the API.
+- Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
 - Login rate limiting and a configurable CORS allowlist.
 - Hourly cleanup of expired revoked tokens.
 - Centralized validation and error handling, including 413 payload responses.
@@ -46,6 +47,8 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 
 ```text
 Back/
+├── assets/
+│   └── logo.png # Brand logo embedded in emails (versioned)
 ├── prisma/
 │   ├── migrations/
 │   ├── schema.prisma
@@ -105,6 +108,13 @@ Configure these variables in `.env`:
 | `JWT_SECRET` | Random secret with at least 32 characters. |
 | `PORT` | HTTP port; normally `3000`. |
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
+| `SMTP_HOST` | SMTP server for recovery emails. Defaults to `smtp.gmail.com`. |
+| `SMTP_PORT` | SMTP port. Defaults to `465`. |
+| `SMTP_SECURE` | `true` for implicit TLS. Defaults to `true`. |
+| `SMTP_USER` | SMTP account used to send recovery emails. |
+| `SMTP_APP_PASSWORD` | Gmail app password for `SMTP_USER`. Never commit it. |
+| `SMTP_FROM` | Optional sender header, for example `HomeKeys Liberty <user@example.com>`. |
+| `PASSWORD_RESET_BASE_URL` | Frontend page that receives `?token=<token>` from the recovery email. |
 
 Connection string format:
 
@@ -414,6 +424,68 @@ Authorization: Bearer <token>
 
 The API stores only the token's SHA-256 hash in `revoked_tokens`, together with its user ID and expiration date. Reusing the token after logout returns `401`.
 
+### Recover a forgotten password
+
+```text
+POST /api/v1/auth/forgot-password
+```
+
+Public endpoint. Body:
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}?token=<token>`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email.
+
+The response is always the same generic message, whether the email exists or not, so the endpoint cannot be used to discover registered accounts:
+
+```json
+{
+  "success": true,
+  "message": "Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.",
+  "data": {}
+}
+```
+
+Requesting a new link invalidates the previous pending links of that user. Each link is valid for 15 minutes and can be used once.
+
+Recovery emails use the branded HomeKeys Liberty template: table-based HTML with inline styles, a 600px card, a call-to-action button, a copyable fallback link, and a security notice. The logo travels inside the email as a CID attachment taken from `assets/logo.png`, so it renders even when the email client blocks remote images; if the file is missing, the email is still sent and a warning is logged. The reusable layout lives in `src/utils/email-template.ts` for future emails. The template forces light mode (`color-scheme: light only`) so clients with dark themes cannot render a half-inverted email.
+
+Possible responses:
+
+- `200`: generic acknowledgment (always).
+- `400 VALIDATION_ERROR`: invalid email.
+- `429 TOO_MANY_RESET_ATTEMPTS`: more than 5 requests in 15 minutes per client.
+
+### Reset a password
+
+```text
+POST /api/v1/auth/reset-password
+```
+
+Public endpoint. Body:
+
+```json
+{
+  "token": "TOKEN_FROM_THE_RECOVERY_EMAIL",
+  "newPassword": "Ejemplo#2026x"
+}
+```
+
+`newPassword` must satisfy the password policy. On success the account password is replaced, the recovery token is marked as used, any other pending link is removed, and every session issued before the reset is closed: the user must sign in again with the new password.
+
+Possible responses:
+
+- `200`: password reset successfully; the user signs in again.
+- `400 VALIDATION_ERROR`: invalid body or password policy violation.
+- `400 INVALID_RESET_TOKEN`: unknown token.
+- `400 RESET_TOKEN_ALREADY_USED`: the link was already used.
+- `400 RESET_TOKEN_EXPIRED`: the link expired; request a new one.
+- `429 TOO_MANY_RESET_ATTEMPTS`: more than 10 requests in 15 minutes per client.
+
 ## Password policy
 
 Every password defined through the API must satisfy this policy:
@@ -423,7 +495,7 @@ Every password defined through the API must satisfy this policy:
 - Character classes are Unicode-aware: `ñ` and accented letters count as letters, not as special characters.
 - The new password cannot be equal to the current one on `PATCH /api/v1/users/me/password`.
 
-The policy applies wherever a password is defined: the optional `password` of `POST /users/add`, the `newPassword` of `PATCH /users/me/password`, and the administrator `password` reset of `PATCH /users/:id`. Violations return `400 VALIDATION_ERROR` with a field-level message.
+The policy applies wherever a password is defined: the optional `password` of `POST /users/add`, the `newPassword` of `PATCH /users/me/password`, the `newPassword` of `POST /auth/reset-password`, and the administrator `password` reset of `PATCH /users/:id`. Violations return `400 VALIDATION_ERROR` with a field-level message.
 
 The policy is not retroactive: existing passwords keep working and are only replaced through a new change or reset. Generated temporary passwords always satisfy the policy. Example of a valid password: `Ejemplo#2026x`.
 
@@ -447,7 +519,7 @@ Errors use a consistent structure:
 
 Unexpected errors return a generic Spanish message without exposing SQL queries, stack traces, tokens, or credentials.
 
-User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`.
+User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`.
 
 ## Postman collection
 
@@ -457,9 +529,9 @@ Import:
 postman/homekeys-liberty-api.postman_collection.json
 ```
 
-The collection keeps a single `Login` request and adds `Change my password`, `Update user`, and `Delete user` next to the read-only and creation requests. Set `loginEmail`, `loginPassword`, `newUserPassword`, and `targetUserId` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
+The collection keeps a single `Login` request and adds `Change my password`, `Update user`, `Delete user`, `Forgot password`, and `Reset password` next to the read-only and creation requests. Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
 
-Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Delete user`, `Change my password`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually.
+Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Delete user`, `Change my password`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` sends a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
 
 The role-specific scenarios are covered by `npm test`; the Postman collection intentionally keeps one login contract for frontend consumers.
 
@@ -471,13 +543,16 @@ These requests can create, modify, and delete users in the target database. Run 
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL or require personal seed data. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, login rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, self-deletion, users with properties), token cleanup on deletion, and password hash exclusion from every response.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, login and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, temporary password generation, password policy enforcement, and the generic single-use recovery flow.
 
-There is also a live check for the user management flows against a real PostgreSQL database using temporary users that are removed at the end. It is not part of `npm test` and can be run with:
+There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
 ```powershell
 npx tsx tests/live/user-management-live.ts
+npx tsx tests/live/password-reset-live.ts
 ```
+
+The password recovery live check additionally delivers real emails through the Gmail SMTP account configured in `.env`.
 
 ## Verification commands
 
@@ -524,6 +599,8 @@ prisma/migrations/20261103003201_add_user_password_changed_at/
 
 It adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change. Apply it with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
+The password recovery flow needs no migration: it reuses the `password_reset_tokens` table created by the initial schema.
+
 ## Security notes
 
 - Never commit `.env`, `prisma/seed.ts`, personal data, or real credentials.
@@ -541,4 +618,9 @@ It adds the nullable `users.password_changed_at` timestamp used as the session-i
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction.
+- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
+- A successful password reset closes every session issued before the reset through `users.password_changed_at`; the user signs in again with the new password.
+- Recovery emails never include passwords, only the one-time link. SMTP secrets live exclusively in the ignored `.env` file and must never be committed; rotate the Gmail app password if it is ever exposed.
+- Failed SMTP delivery is logged server-side and never changes the generic HTTP response.
+- Expired revoked tokens and expired password reset tokens are removed at startup and every hour.
 - The `deepmerge-ts` npm override patches a transitive Prisma CLI vulnerability while preserving Prisma 6 compatibility. Re-run Prisma validation and `npm audit` before changing it.

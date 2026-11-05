@@ -1,9 +1,22 @@
 import { Router } from "express";
-import { login, logout } from "../controllers/auth-controller";
+import {
+  forgotPassword,
+  login,
+  logout,
+  resetPassword,
+} from "../controllers/auth-controller";
 import { authenticate } from "../middleware/authenticate";
-import { loginRateLimiter } from "../middleware/rate-limiters";
+import {
+  forgotPasswordRateLimiter,
+  loginRateLimiter,
+  resetPasswordRateLimiter,
+} from "../middleware/rate-limiters";
 import { validateRequest } from "../middleware/validate-request";
-import { loginSchema } from "../validators/auth-validators";
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  resetPasswordSchema,
+} from "../validators/auth-validators";
 
 export const authRoutes = Router();
 
@@ -14,3 +27,16 @@ authRoutes.post(
   login,
 );
 authRoutes.post("/logout", authenticate, logout);
+
+authRoutes.post(
+  "/forgot-password",
+  forgotPasswordRateLimiter,
+  validateRequest(forgotPasswordSchema),
+  forgotPassword,
+);
+authRoutes.post(
+  "/reset-password",
+  resetPasswordRateLimiter,
+  validateRequest(resetPasswordSchema),
+  resetPassword,
+);

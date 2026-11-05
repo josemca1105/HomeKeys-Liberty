@@ -64,6 +64,23 @@ describe("Security and maintenance HTTP integration", { concurrency: false }, ()
     assert.equal(blockedResponse.body.code, "TOO_MANY_LOGIN_ATTEMPTS");
   });
 
+  it("rate limits password recovery requests", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await request(app)
+        .post("/api/v1/auth/forgot-password")
+        .send({ email: "unknown@example.com" });
+
+      assert.equal(response.status, 200);
+    }
+
+    const blockedResponse = await request(app)
+      .post("/api/v1/auth/forgot-password")
+      .send({ email: "unknown@example.com" });
+
+    assert.equal(blockedResponse.status, 429);
+    assert.equal(blockedResponse.body.code, "TOO_MANY_RESET_ATTEMPTS");
+  });
+
   it("deletes only expired revoked tokens", async () => {
     database.revokedTokens.push(
       createRevokedTokenFixture(

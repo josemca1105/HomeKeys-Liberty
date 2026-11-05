@@ -1,12 +1,15 @@
 import { createApp } from "./app";
 import { prisma } from "./config/database";
 import { environment } from "./config/env";
-import { cleanupExpiredRevokedTokens } from "./services/token-cleanup-service";
+import {
+  cleanupExpiredPasswordResetTokens,
+  cleanupExpiredRevokedTokens,
+} from "./services/token-cleanup-service";
 
 const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 let isTokenCleanupRunning = false;
 
-const runRevokedTokenCleanup = async (): Promise<void> => {
+const runTokenCleanup = async (): Promise<void> => {
   if (isTokenCleanupRunning) {
     return;
   }
@@ -14,13 +17,21 @@ const runRevokedTokenCleanup = async (): Promise<void> => {
   isTokenCleanupRunning = true;
 
   try {
-    const deletedTokens = await cleanupExpiredRevokedTokens();
+    const deletedRevokedTokens = await cleanupExpiredRevokedTokens();
 
-    if (deletedTokens > 0) {
-      console.log(`Removed ${deletedTokens} expired revoked tokens.`);
+    if (deletedRevokedTokens > 0) {
+      console.log(`Removed ${deletedRevokedTokens} expired revoked tokens.`);
+    }
+
+    const deletedResetTokens = await cleanupExpiredPasswordResetTokens();
+
+    if (deletedResetTokens > 0) {
+      console.log(
+        `Removed ${deletedResetTokens} expired password reset tokens.`,
+      );
     }
   } catch (error) {
-    console.error("Failed to clean up expired revoked tokens.", error);
+    console.error("Failed to clean up expired tokens.", error);
   } finally {
     isTokenCleanupRunning = false;
   }
@@ -28,10 +39,10 @@ const runRevokedTokenCleanup = async (): Promise<void> => {
 
 const startServer = async (): Promise<void> => {
   await prisma.$connect();
-  await runRevokedTokenCleanup();
+  await runTokenCleanup();
 
   const cleanupInterval = setInterval((): void => {
-    void runRevokedTokenCleanup();
+    void runTokenCleanup();
   }, TOKEN_CLEANUP_INTERVAL_MS);
   cleanupInterval.unref();
 

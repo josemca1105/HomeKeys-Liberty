@@ -74,9 +74,36 @@ interface DeleteRevokedTokensArgs {
   };
 }
 
+interface FindPasswordResetTokenArgs {
+  where: {
+    tokenHash: string;
+  };
+}
+
+interface CreatePasswordResetTokenArgs {
+  data: {
+    tokenHash: string;
+    userId: number;
+    expiresAt: Date;
+  };
+}
+
+interface UpdatePasswordResetTokenArgs {
+  where: {
+    id: number;
+  };
+  data: {
+    used?: boolean;
+  };
+}
+
 interface DeletePasswordResetTokensArgs {
   where: {
-    userId: number;
+    userId?: number;
+    used?: boolean;
+    expiresAt?: {
+      lte?: Date;
+    };
   };
 }
 
@@ -107,6 +134,15 @@ interface RevokedTokenDelegateMock {
 }
 
 interface PasswordResetTokenDelegateMock {
+  findUnique: (
+    args: FindPasswordResetTokenArgs,
+  ) => Promise<PasswordResetToken | null>;
+  create: (
+    args: CreatePasswordResetTokenArgs,
+  ) => Promise<PasswordResetToken>;
+  update: (
+    args: UpdatePasswordResetTokenArgs,
+  ) => Promise<PasswordResetToken>;
   deleteMany: (
     args: DeletePasswordResetTokensArgs,
   ) => Promise<{ count: number }>;
@@ -373,14 +409,80 @@ export const createMockDatabase = (): MockDatabase => {
     return { count: tokensToDelete.length };
   };
 
+  passwordResetTokenDelegate.findUnique = async (
+    args: FindPasswordResetTokenArgs,
+  ): Promise<PasswordResetToken | null> => {
+    const token = passwordResetTokens.find(
+      (candidate) => candidate.tokenHash === args.where.tokenHash,
+    );
+    return token ? { ...token } : null;
+  };
+
+  passwordResetTokenDelegate.create = async (
+    args: CreatePasswordResetTokenArgs,
+  ): Promise<PasswordResetToken> => {
+    const nextId =
+      passwordResetTokens.length > 0
+        ? Math.max(...passwordResetTokens.map((token) => token.id)) + 1
+        : 1;
+    const token: PasswordResetToken = {
+      id: nextId,
+      used: false,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      ...args.data,
+    };
+    passwordResetTokens.push(token);
+    return { ...token };
+  };
+
+  passwordResetTokenDelegate.update = async (
+    args: UpdatePasswordResetTokenArgs,
+  ): Promise<PasswordResetToken> => {
+    const token = passwordResetTokens.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!token) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(token, args.data);
+    return { ...token };
+  };
+
   passwordResetTokenDelegate.deleteMany = async (
     args: DeletePasswordResetTokensArgs,
   ): Promise<{ count: number }> => {
-    const tokensToDelete = passwordResetTokens.filter(
-      (token) => token.userId === args.where.userId,
-    );
+    const matchesWhere = (token: PasswordResetToken): boolean => {
+      if (
+        args.where.userId !== undefined &&
+        token.userId !== args.where.userId
+      ) {
+        return false;
+      }
+
+      if (args.where.used !== undefined && token.used !== args.where.used) {
+        return false;
+      }
+
+      const expiresBefore = args.where.expiresAt?.lte;
+
+      if (
+        expiresBefore !== undefined &&
+        token.expiresAt.getTime() > expiresBefore.getTime()
+      ) {
+        return false;
+      }
+
+      return true;
+    };
+
+    const tokensToDelete = passwordResetTokens.filter(matchesWhere);
     const remainingTokens = passwordResetTokens.filter(
-      (token) => token.userId !== args.where.userId,
+      (token) => !matchesWhere(token),
     );
 
     passwordResetTokens.splice(0, passwordResetTokens.length, ...remainingTokens);

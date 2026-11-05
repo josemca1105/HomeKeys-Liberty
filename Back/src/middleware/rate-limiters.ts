@@ -18,3 +18,37 @@ export const loginRateLimiter = rateLimit({
     );
   },
 });
+
+export const forgotPasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: (_req, _res, next): void => {
+    next(
+      new AppError({
+        statusCode: 429,
+        code: "TOO_MANY_RESET_ATTEMPTS",
+        message:
+          "Has realizado demasiadas solicitudes de recuperación. Espera unos minutos e intenta de nuevo.",
+      }),
+    );
+  },
+});
+
+export const resetPasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: (_req, _res, next): void => {
+    next(
+      new AppError({
+        statusCode: 429,
+        code: "TOO_MANY_RESET_ATTEMPTS",
+        message:
+          "Has realizado demasiados intentos de recuperación. Espera unos minutos e intenta de nuevo.",
+      }),
+    );
+  },
+});
