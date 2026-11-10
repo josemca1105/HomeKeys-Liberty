@@ -180,6 +180,48 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     assert.equal(partner.passwordChangedAt !== null, true);
   });
 
+  it("consumes a recovery token only once under concurrent requests", async () => {
+    const rawToken = "d".repeat(64);
+    database.passwordResetTokens.push(
+      createPasswordResetTokenFixture(
+        1,
+        hashToken(rawToken),
+        2,
+        new Date(Date.now() + 15 * 60 * 1000),
+      ),
+    );
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app)
+        .post("/api/v1/auth/reset-password")
+        .send({ token: rawToken, newPassword: TEST_CHANGED_PASSWORD }),
+      request(app)
+        .post("/api/v1/auth/reset-password")
+        .send({ token: rawToken, newPassword: TEST_ADMIN_PASSWORD }),
+    ]);
+
+    const responses = [firstResponse, secondResponse];
+    const successfulResponses = responses.filter(
+      (response) => response.status === 200,
+    );
+    const rejectedResponses = responses.filter(
+      (response) => response.status === 400,
+    );
+
+    assert.equal(successfulResponses.length, 1);
+    assert.equal(rejectedResponses.length, 1);
+    assert.equal(
+      rejectedResponses[0]?.body.code,
+      "RESET_TOKEN_ALREADY_USED",
+    );
+
+    const storedToken = database.passwordResetTokens.find(
+      (token) => token.tokenHash === hashToken(rawToken),
+    );
+    assert.ok(storedToken);
+    assert.equal(storedToken.used, true);
+  });
+
   it("rejects expired tokens, unknown tokens and weak new passwords", async () => {
     const expiredRawToken = "a".repeat(64);
     const validRawToken = "b".repeat(64);

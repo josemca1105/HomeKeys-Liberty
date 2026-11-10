@@ -97,6 +97,20 @@ interface UpdatePasswordResetTokenArgs {
   };
 }
 
+interface UpdateManyPasswordResetTokensArgs {
+  where: {
+    id?: number;
+    userId?: number;
+    used?: boolean;
+    expiresAt?: {
+      gt?: Date;
+    };
+  };
+  data: {
+    used?: boolean;
+  };
+}
+
 interface DeletePasswordResetTokensArgs {
   where: {
     userId?: number;
@@ -143,6 +157,9 @@ interface PasswordResetTokenDelegateMock {
   update: (
     args: UpdatePasswordResetTokenArgs,
   ) => Promise<PasswordResetToken>;
+  updateMany: (
+    args: UpdateManyPasswordResetTokensArgs,
+  ) => Promise<{ count: number }>;
   deleteMany: (
     args: DeletePasswordResetTokensArgs,
   ) => Promise<{ count: number }>;
@@ -453,6 +470,48 @@ export const createMockDatabase = (): MockDatabase => {
 
     Object.assign(token, args.data);
     return { ...token };
+  };
+
+  passwordResetTokenDelegate.updateMany = async (
+    args: UpdateManyPasswordResetTokensArgs,
+  ): Promise<{ count: number }> => {
+    const matchesWhere = (token: PasswordResetToken): boolean => {
+      if (args.where.id !== undefined && token.id !== args.where.id) {
+        return false;
+      }
+
+      if (
+        args.where.userId !== undefined &&
+        token.userId !== args.where.userId
+      ) {
+        return false;
+      }
+
+      if (args.where.used !== undefined && token.used !== args.where.used) {
+        return false;
+      }
+
+      const expiresAfter = args.where.expiresAt?.gt;
+
+      if (
+        expiresAfter !== undefined &&
+        token.expiresAt.getTime() <= expiresAfter.getTime()
+      ) {
+        return false;
+      }
+
+      return true;
+    };
+
+    const tokensToUpdate = passwordResetTokens.filter(matchesWhere);
+
+    for (const token of tokensToUpdate) {
+      if (args.data.used !== undefined) {
+        token.used = args.data.used;
+      }
+    }
+
+    return { count: tokensToUpdate.length };
   };
 
   passwordResetTokenDelegate.deleteMany = async (

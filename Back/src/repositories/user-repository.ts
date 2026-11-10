@@ -128,16 +128,16 @@ export const updateUserAndInvalidateResetTokens = async (
   userData: UpdateUserData,
 ): Promise<User> => {
   return prisma.$transaction(async (transaction) => {
-    const user = await transaction.user.update({
-      where: { id: userId },
-      data: userData,
-    });
-
+    // Token rows are locked before the user row to keep the same lock order
+    // as password resets and avoid PostgreSQL deadlocks.
     await transaction.passwordResetToken.deleteMany({
       where: { userId },
     });
 
-    return user;
+    return transaction.user.update({
+      where: { id: userId },
+      data: userData,
+    });
   });
 };
 

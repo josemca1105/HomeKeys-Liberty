@@ -477,7 +477,7 @@ Public endpoint. Body:
 }
 ```
 
-`newPassword` must satisfy the password policy. On success the account password is replaced, the recovery token is marked as used, any other pending link is removed, and every session issued before the reset is closed: the user must sign in again with the new password.
+`newPassword` must satisfy the password policy. On success the account password is replaced, the recovery token is marked as used, any other pending link is removed, and every session issued before the reset is closed: the user must sign in again with the new password. The token is consumed with a conditional update inside the same transaction that changes the password, so two concurrent requests using the same link cannot both apply a new password.
 
 Possible responses:
 

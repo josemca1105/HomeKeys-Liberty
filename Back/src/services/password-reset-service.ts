@@ -17,6 +17,49 @@ export const INVITATION_TOKEN_TTL_MINUTES = 24 * 60;
 
 const RESET_TOKEN_BYTES = 32;
 
+const invalidResetTokenError = (): AppError => {
+  return new AppError({
+    statusCode: 400,
+    code: "INVALID_RESET_TOKEN",
+    message: "El enlace no es válido.",
+  });
+};
+
+const resetTokenAlreadyUsedError = (): AppError => {
+  return new AppError({
+    statusCode: 400,
+    code: "RESET_TOKEN_ALREADY_USED",
+    message: "Este enlace ya fue utilizado. Solicita uno nuevo.",
+  });
+};
+
+const resetTokenExpiredError = (): AppError => {
+  return new AppError({
+    statusCode: 400,
+    code: "RESET_TOKEN_EXPIRED",
+    message: "El enlace expiró. Solicita uno nuevo.",
+  });
+};
+
+const resolveResetTokenFailure = async (token: string): Promise<AppError> => {
+  const currentToken = await findPasswordResetTokenByHash(hashToken(token));
+
+  if (!currentToken) {
+    return invalidResetTokenError();
+  }
+
+  if (currentToken.used) {
+    return resetTokenAlreadyUsedError();
+  }
+
+  if (currentToken.expiresAt.getTime() <= Date.now()) {
+    return resetTokenExpiredError();
+  }
+
+  // A concurrent request consumed the token first.
+  return resetTokenAlreadyUsedError();
+};
+
 // Issues a single-use, SHA-256-hashed recovery/invitation token and returns
 // the raw token that must only travel inside the email link.
 export const issuePasswordResetToken = async (
@@ -72,38 +115,33 @@ export const resetUserPassword = async (
   const tokenRecord = await findPasswordResetTokenByHash(hashToken(token));
 
   if (!tokenRecord) {
-    throw new AppError({
-      statusCode: 400,
-      code: "INVALID_RESET_TOKEN",
-      message: "El enlace no es válido.",
-    });
+    throw invalidResetTokenError();
   }
 
   if (tokenRecord.used) {
-    throw new AppError({
-      statusCode: 400,
-      code: "RESET_TOKEN_ALREADY_USED",
-      message: "Este enlace ya fue utilizado. Solicita uno nuevo.",
-    });
+    throw resetTokenAlreadyUsedError();
   }
 
   if (tokenRecord.expiresAt.getTime() <= Date.now()) {
-    throw new AppError({
-      statusCode: 400,
-      code: "RESET_TOKEN_EXPIRED",
-      message: "El enlace expiró. Solicita uno nuevo.",
-    });
+    throw resetTokenExpiredError();
   }
 
   const passwordHash = await hashPassword(newPassword);
+  const passwordChangedAt = new Date();
 
   // passwordChangedAt closes every session issued before the change and
   // mustChangePassword clears the forced-change state from invitations and
-  // administrator resets.
-  await applyPasswordReset(
-    tokenRecord.id,
-    tokenRecord.userId,
+  // administrator resets. The conditional update inside applyPasswordReset
+  // guarantees the token is consumed exactly once.
+  const wasApplied = await applyPasswordReset({
+    tokenId: tokenRecord.id,
+    userId: tokenRecord.userId,
     passwordHash,
-    new Date(),
-  );
+    passwordChangedAt,
+    now: passwordChangedAt,
+  });
+
+  if (!wasApplied) {
+    throw await resolveResetTokenFailure(token);
+  }
 };
