@@ -342,7 +342,7 @@ Validation rules:
 - Unknown fields are rejected with `400 VALIDATION_ERROR`.
 - Only the bcrypt hash is stored; hashes are never returned.
 
-Security behavior: changing the password invalidates every session issued before the change, including sessions on other devices. The JWT of the session that performed the change is also invalidated, so the response includes a fresh access token in `data.token`; the caller must replace its stored token with that value to stay signed in. This behavior is documented on purpose: the current session continues seamlessly while older sessions stop working immediately.
+Security behavior: changing the password invalidates every session issued before the change, including sessions on other devices, and deletes any pending invitation or password recovery link. The JWT of the session that performed the change is also invalidated, so the response includes a fresh access token in `data.token`; the caller must replace its stored token with that value to stay signed in. This behavior is documented on purpose: the current session continues seamlessly while older sessions stop working immediately.
 
 Possible responses:
 
@@ -375,9 +375,9 @@ Only `ADMIN` users can access this endpoint. `ADMIN` can edit any user, includin
 Validation rules:
 
 - Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, and `password`. Unknown fields are rejected, including `id`, `createdAt`, and `updatedAt`.
-- `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`.
+- `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address.
 - `role` accepts only `ADMIN` or `PARTNER`.
-- `password` is optional and allows an administrator to set a new password without knowing the current one. It is hashed with bcrypt and invalidates every session previously issued for that user.
+- `password` is optional and allows an administrator to set a new password without knowing the current one. It is hashed with bcrypt, invalidates every session previously issued for that user, and deletes any pending invitation or password recovery link.
 - Demoting the last `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; an `ADMIN` can demote itself whenever another `ADMIN` remains.
 - When an `ADMIN` resets its own password through this endpoint, the response also includes a fresh `data.token` so the current session continues.
 
@@ -677,6 +677,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are shown only once in the creation response, and are stored only as bcrypt hashes.
 - The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
+- Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction.
 - Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.

@@ -121,6 +121,26 @@ export const updateUserRecord = async (
   });
 };
 
+// Password and email changes invalidate every pending invitation or recovery
+// link so a previously issued token cannot be used to take over the account.
+export const updateUserAndInvalidateResetTokens = async (
+  userId: number,
+  userData: UpdateUserData,
+): Promise<User> => {
+  return prisma.$transaction(async (transaction) => {
+    const user = await transaction.user.update({
+      where: { id: userId },
+      data: userData,
+    });
+
+    await transaction.passwordResetToken.deleteMany({
+      where: { userId },
+    });
+
+    return user;
+  });
+};
+
 export const countUsersByRole = async (role: Role): Promise<number> => {
   return prisma.user.count({
     where: { role },

@@ -9,6 +9,7 @@ import {
   findUserByEmail,
   findUserById,
   findUserCredentialsById,
+  updateUserAndInvalidateResetTokens,
   updateUserRecord,
   type UpdateUserData,
 } from "../repositories/user-repository";
@@ -196,7 +197,7 @@ export const changeOwnPassword = async (
     throw invalidCurrentPasswordError();
   }
 
-  const updatedUser = await updateUserRecord(userId, {
+  const updatedUser = await updateUserAndInvalidateResetTokens(userId, {
     passwordHash: await hashPassword(input.newPassword),
     passwordChangedAt: passwordChangeTimestamp(),
     mustChangePassword: false,
@@ -219,8 +220,12 @@ export const updateUserByAdmin = async (
     throw userNotFoundError("actualizar");
   }
 
-  if (input.email !== undefined && input.email !== targetUser.email) {
-    const existingUser = await findUserByEmail(input.email);
+  const newEmail = input.email;
+  const isChangingEmail =
+    newEmail !== undefined && newEmail !== targetUser.email;
+
+  if (isChangingEmail) {
+    const existingUser = await findUserByEmail(newEmail);
 
     if (existingUser) {
       throw duplicateEmailError();
@@ -250,6 +255,7 @@ export const updateUserByAdmin = async (
   };
 
   const isChangingPassword = input.password !== undefined;
+  const shouldInvalidateResetTokens = isChangingPassword || isChangingEmail;
 
   if (input.password !== undefined) {
     updateData.passwordHash = await hashPassword(input.password);
@@ -258,7 +264,9 @@ export const updateUserByAdmin = async (
   }
 
   try {
-    const updatedUser = await updateUserRecord(targetUserId, updateData);
+    const updatedUser = shouldInvalidateResetTokens
+      ? await updateUserAndInvalidateResetTokens(targetUserId, updateData)
+      : await updateUserRecord(targetUserId, updateData);
     const isOwnPasswordChange =
       isChangingPassword && targetUserId === actingUserId;
 

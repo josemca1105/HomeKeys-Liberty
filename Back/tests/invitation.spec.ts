@@ -42,6 +42,38 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     setMailSenderForTesting(null);
   });
 
+  const extractTokenFromMail = (mail: OutgoingMail): string => {
+    const match = /token=([0-9a-f]+)/.exec(mail.text);
+    assert.ok(match);
+    return match[1] as string;
+  };
+
+  const createInvitedUser = async (
+    adminToken: string,
+    email: string,
+  ): Promise<{ userId: number; invitationToken: string }> => {
+    const response = await request(app)
+      .post("/api/v1/users/add")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        firstName: "Test",
+        lastName: "Invited",
+        email,
+        phone: "00000000",
+        photoUrl: null,
+      });
+
+    assert.equal(response.status, 201);
+
+    const invitationMail = outbox[outbox.length - 1];
+    assert.ok(invitationMail);
+
+    return {
+      userId: response.body.data.user.id as number,
+      invitationToken: extractTokenFromMail(invitationMail),
+    };
+  };
+
   const login = async (
     email: string,
     password: string,
@@ -224,5 +256,89 @@ describe("Invitation and forced password change HTTP integration", { concurrency
 
     assert.equal(changeResponse.status, 200);
     assert.equal(changeResponse.body.data.user.mustChangePassword, false);
+  });
+
+  it("invalidates a pending invitation when an ADMIN changes the password", async () => {
+    const adminToken = (
+      await login("admin@example.com", TEST_ADMIN_PASSWORD)
+    ).token;
+    const { userId, invitationToken } = await createInvitedUser(
+      adminToken,
+      "invitation-password@example.com",
+    );
+
+    const updateResponse = await request(app)
+      .patch(`/api/v1/users/${userId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ password: TEST_CHANGED_PASSWORD });
+
+    assert.equal(updateResponse.status, 200);
+    assert.equal(database.passwordResetTokens.length, 0);
+
+    const resetResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: invitationToken, newPassword: TEST_ADMIN_PASSWORD });
+
+    assert.equal(resetResponse.status, 400);
+    assert.equal(resetResponse.body.code, "INVALID_RESET_TOKEN");
+  });
+
+  it("invalidates a pending invitation when an ADMIN changes the email", async () => {
+    const adminToken = (
+      await login("admin@example.com", TEST_ADMIN_PASSWORD)
+    ).token;
+    const { userId, invitationToken } = await createInvitedUser(
+      adminToken,
+      "invitation-email@example.com",
+    );
+
+    const updateResponse = await request(app)
+      .patch(`/api/v1/users/${userId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: "invitation-email-corrected@example.com" });
+
+    assert.equal(updateResponse.status, 200);
+    assert.equal(database.passwordResetTokens.length, 0);
+
+    const resetResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: invitationToken, newPassword: TEST_ADMIN_PASSWORD });
+
+    assert.equal(resetResponse.status, 400);
+    assert.equal(resetResponse.body.code, "INVALID_RESET_TOKEN");
+  });
+
+  it("invalidates a pending recovery token when the user changes its own password", async () => {
+    const partnerToken = (
+      await login("partner@example.com", TEST_PARTNER_PASSWORD)
+    ).token;
+
+    const forgotResponse = await request(app)
+      .post("/api/v1/auth/forgot-password")
+      .send({ email: "partner@example.com" });
+
+    assert.equal(forgotResponse.status, 200);
+
+    const resetMail = outbox[outbox.length - 1];
+    assert.ok(resetMail);
+    const recoveryToken = extractTokenFromMail(resetMail);
+
+    const changeResponse = await request(app)
+      .patch("/api/v1/users/me/password")
+      .set("Authorization", `Bearer ${partnerToken}`)
+      .send({
+        currentPassword: TEST_PARTNER_PASSWORD,
+        newPassword: TEST_CHANGED_PASSWORD,
+      });
+
+    assert.equal(changeResponse.status, 200);
+    assert.equal(database.passwordResetTokens.length, 0);
+
+    const resetResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: recoveryToken, newPassword: TEST_ADMIN_PASSWORD });
+
+    assert.equal(resetResponse.status, 400);
+    assert.equal(resetResponse.body.code, "INVALID_RESET_TOKEN");
   });
 });
