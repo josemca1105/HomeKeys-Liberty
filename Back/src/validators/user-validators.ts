@@ -3,6 +3,7 @@ import {
   createPasswordSchema,
   strictObjectError,
 } from "./password-schema";
+import { photoUrlSchema } from "./photo-url-schema";
 import { createRequiredStringSchema } from "./string-schema";
 
 const roleSchema = z.enum(["ADMIN", "PARTNER"], {
@@ -56,13 +57,7 @@ export const createUserSchema = z.object(
       .trim()
       .min(1, "El teléfono es obligatorio.")
       .max(20, "El teléfono no puede tener más de 20 caracteres."),
-    photoUrl: z
-      .string({ error: "La URL de la foto debe ser un texto." })
-      .trim()
-      .max(2048, "La URL de la foto no puede tener más de 2048 caracteres.")
-      .url("Debes ingresar una URL válida para la foto.")
-      .nullable()
-      .optional(),
+    photoUrl: photoUrlSchema,
     role: roleSchema.optional(),
   },
   { error: "El cuerpo de la petición debe ser un objeto JSON." },
@@ -129,13 +124,7 @@ export const updateUserSchema = z
         .min(1, "El teléfono es obligatorio.")
         .max(20, "El teléfono no puede tener más de 20 caracteres.")
         .optional(),
-      photoUrl: z
-        .string({ error: "La URL de la foto debe ser un texto." })
-        .trim()
-        .max(2048, "La URL de la foto no puede tener más de 2048 caracteres.")
-        .url("Debes ingresar una URL válida para la foto.")
-        .nullable()
-        .optional(),
+      photoUrl: photoUrlSchema,
       role: roleSchema.optional(),
       password: createPasswordSchema(
         "La contraseña es obligatoria.",

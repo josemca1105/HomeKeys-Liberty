@@ -315,6 +315,8 @@ Example with the default PARTNER role and no explicit password:
 
 The `password` field is optional and is never disclosed. When it is omitted, the API generates a random initial password internally; when it is sent explicitly, it must satisfy the password policy and only the ADMIN knows it (it is never emailed).
 
+The optional `photoUrl` must be an absolute `http` or `https` URL without embedded credentials. `javascript:`, `data:`, `ftp:` and literal localhost, private, link-local or internal hosts are rejected.
+
 Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend the link through `POST /auth/forgot-password`.
 
 To create another administrator, add:
@@ -400,6 +402,7 @@ Only `ADMIN` users can access this endpoint. `ADMIN` can edit any user, includin
 Validation rules:
 
 - Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, and `password`. Unknown fields are rejected, including `id`, `createdAt`, and `updatedAt`.
+- `photoUrl` must be an absolute `http` or `https` URL without embedded credentials; `null` clears it. Literal localhost, private, link-local and internal hosts are rejected.
 - `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address.
 - `role` accepts only `ADMIN` or `PARTNER`.
 - `password` is optional and allows an administrator to set a new password without knowing the current one. It is hashed with bcrypt, invalidates every session previously issued for that user, and deletes any pending invitation or password recovery link.
@@ -708,6 +711,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
 - User accounts never expose a password anywhere: initial passwords are generated internally, invitation and notice emails carry only links, and explicit ADMIN passwords travel through their own channel. Invitation tokens are single-use and valid for 24 hours.
 - Accounts created or reset by an ADMIN must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`), and administrator password resets notify the affected user by email without including the new password.
+- Profile photo URLs only accept `http` or `https`, reject embedded credentials, and reject literal localhost, private, link-local and internal hosts. This prevents stored XSS through `javascript:`/`data:` URLs and basic SSRF attempts against local or cloud-metadata addresses. If the backend later downloads images, it must also resolve DNS and enforce an allowlist or an SSRF-safe fetcher.
 - A successful password reset closes every session issued before the reset through `users.password_changed_at`; the user signs in again with the new password.
 - Recovery emails never include passwords, only the one-time link. SMTP secrets live exclusively in the ignored `.env` file and must never be committed; rotate the Gmail app password if it is ever exposed.
 - Failed SMTP delivery is logged server-side and never changes the generic HTTP response.

@@ -552,6 +552,29 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     }
   });
 
+  it("rejects unsafe photo URLs", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const invalidPhotoUrls = [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "ftp://example.com/photo.jpg",
+      "http://localhost/photo.jpg",
+      "http://169.254.169.254/latest/meta-data",
+      "https://user:password@example.com/photo.jpg",
+    ];
+
+    for (const photoUrl of invalidPhotoUrls) {
+      const response = await request(app)
+        .patch("/api/v1/users/2")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ photoUrl });
+
+      assert.equal(response.status, 400);
+      assert.equal(response.body.code, "VALIDATION_ERROR");
+    }
+  });
+
   it("protects the last ADMIN from role demotion", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
