@@ -58,7 +58,7 @@ const userNotFoundError = (action: string): AppError => {
 
 const invalidCurrentPasswordError = (): AppError => {
   return new AppError({
-    statusCode: 401,
+    statusCode: 422,
     code: "INVALID_CURRENT_PASSWORD",
     message: "La contraseña actual no es correcta.",
   });

@@ -375,7 +375,7 @@ Possible responses:
 
 - `200`: password updated; `data.user` plus the fresh `data.token`.
 - `400 VALIDATION_ERROR`: invalid body, invalid new password, or same password.
-- `401 INVALID_CURRENT_PASSWORD`: `currentPassword` does not match.
+- `422 INVALID_CURRENT_PASSWORD`: `currentPassword` does not match; the session remains valid.
 - `401`: missing, invalid, expired, or revoked token.
 
 ### Update a user

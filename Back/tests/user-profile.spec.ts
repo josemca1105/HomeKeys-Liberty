@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Role } from "@prisma/client";
 import type { Express } from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { environment } from "../src/config/env";
+import type { OutgoingMail } from "../src/utils/mailer";
+import { setMailSenderForTesting } from "../src/utils/mailer";
 import {
   createMockDatabase,
   createPasswordResetTokenFixture,
@@ -207,10 +209,23 @@ describe("User profile HTTP integration", { concurrency: false }, () => {
 describe("User management HTTP integration", { concurrency: false }, () => {
   let app: Express;
   let database: MockDatabase;
+  let outbox: OutgoingMail[];
 
   beforeEach(() => {
     database = createMockDatabase();
     app = createApp();
+    outbox = [];
+
+    setMailSenderForTesting({
+      sendMail: async (options: OutgoingMail): Promise<unknown> => {
+        outbox.push(options);
+        return { accepted: [options.to] };
+      },
+    });
+  });
+
+  afterEach(() => {
+    setMailSenderForTesting(null);
   });
 
   const login = async (email: string, password: string): Promise<string> => {
@@ -287,6 +302,8 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(response.body.data.user.id, 2);
     assert.equal("passwordHash" in response.body.data.user, false);
     assert.equal("token" in response.body.data, false);
+    assert.equal(outbox.length, 1);
+    assert.equal(outbox[0]?.to, "partner@example.com");
 
     const invalidatedResponse = await request(app)
       .get("/api/v1/users/me")
@@ -321,6 +338,8 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.data.user.id, 1);
     assert.equal(typeof response.body.data.token, "string");
+    assert.equal(outbox.length, 1);
+    assert.equal(outbox[0]?.to, "admin@example.com");
 
     const freshSessionResponse = await request(app)
       .get("/api/v1/users/me")
@@ -462,7 +481,7 @@ describe("User management HTTP integration", { concurrency: false }, () => {
         newPassword: TEST_CHANGED_PASSWORD,
       });
 
-    assert.equal(response.status, 401);
+    assert.equal(response.status, 422);
     assert.equal(response.body.code, "INVALID_CURRENT_PASSWORD");
     assert.equal(partner.passwordHash, passwordHashBefore);
 

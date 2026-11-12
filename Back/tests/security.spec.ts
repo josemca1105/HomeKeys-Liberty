@@ -87,7 +87,7 @@ describe("Security and maintenance HTTP integration", { concurrency: false }, ()
           newPassword: TEST_CHANGED_PASSWORD,
         });
 
-      assert.equal(response.status, 401);
+      assert.equal(response.status, 422);
       assert.equal(response.body.code, "INVALID_CURRENT_PASSWORD");
     }
 
