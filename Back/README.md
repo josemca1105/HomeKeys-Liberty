@@ -203,6 +203,8 @@ The current physical database schema is entirely in English:
 - Property categories: `House`, `Apartment`, and `Commercial`.
 - Property listing types: `Sale` and `Rent`.
 - Property statuses: `Active` and `Inactive`.
+- `revoked_tokens` and `password_reset_tokens` reference `users` with `ON DELETE CASCADE`.
+- Indexed lookups: user list ordering (`created_at`, `id`), token revocation and recovery by `user_id`, properties by `agent_id`, and photos by `property_id`.
 
 ## Available scripts
 
@@ -684,11 +686,14 @@ This project keeps every schema change in its own migration:
 ```text
 prisma/migrations/20261103003201_add_user_password_changed_at/
 prisma/migrations/20261105020528_add_user_must_change_password/
+prisma/migrations/20261111000000_add_relations_and_indexes/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
 
-The second one adds `users.must_change_password`, the flag behind the mandatory password change for invited or ADMIN-reset accounts. Apply both with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
+The second one adds `users.must_change_password`, the flag behind the mandatory password change for invited or ADMIN-reset accounts.
+
+The third one removes any orphaned token rows, adds lookup indexes for token revocation, token recovery, user listing, properties by agent and photos by property, and makes both token tables reference `users` with `ON DELETE CASCADE`. The cascade guarantees that token rows cannot survive a user deleted outside the API. Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
 The password recovery and invitation flows need no other migrations: they reuse the `password_reset_tokens` table created by the initial schema.
 
@@ -709,7 +714,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
-- User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction.
+- User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction. Database foreign keys also cascade those rows if a user is deleted outside the API.
 - Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and SMTP delivery run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
 - User accounts never expose a password anywhere: initial passwords are generated internally, invitation and notice emails carry only links, and explicit ADMIN passwords travel through their own channel. Invitation tokens are single-use and valid for 24 hours.
 - Accounts created or reset by an ADMIN must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`), and administrator password resets notify the affected user by email without including the new password.

@@ -67,8 +67,11 @@ model User {
   // When true, the user must define a new password before using the API again.
   mustChangePassword Boolean @default(false) @map("must_change_password")
 
-  properties Property[]
+  properties          Property[]
+  revokedTokens       RevokedToken[]
+  passwordResetTokens PasswordResetToken[]
 
+  @@index([createdAt, id])
   @@map("users")
 }
 
@@ -99,6 +102,7 @@ model Property {
   agent  User    @relation(fields: [agentId], references: [id])
   photos Photo[]
 
+  @@index([agentId])
   @@map("properties")
 }
 
@@ -113,6 +117,7 @@ model Photo {
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
+  @@index([propertyId])
   @@map("photos")
 }
 
@@ -124,7 +129,10 @@ model RevokedToken {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([expiresAt])
+  @@index([userId])
   @@map("revoked_tokens")
 }
 
@@ -137,6 +145,9 @@ model PasswordResetToken {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([expiresAt])
+  @@index([userId])
   @@map("password_reset_tokens")
 }
