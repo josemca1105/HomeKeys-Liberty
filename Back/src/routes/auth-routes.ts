@@ -7,9 +7,12 @@ import {
 } from "../controllers/auth-controller";
 import { authenticate } from "../middleware/authenticate";
 import {
-  forgotPasswordRateLimiter,
-  loginRateLimiter,
-  resetPasswordRateLimiter,
+  forgotPasswordEmailRateLimiter,
+  forgotPasswordIpRateLimiter,
+  loginAccountRateLimiter,
+  loginIpRateLimiter,
+  resetPasswordIpRateLimiter,
+  resetPasswordTokenRateLimiter,
 } from "../middleware/rate-limiters";
 import { validateRequest } from "../middleware/validate-request";
 import {
@@ -22,7 +25,8 @@ export const authRoutes = Router();
 
 authRoutes.post(
   "/login",
-  loginRateLimiter,
+  loginIpRateLimiter,
+  loginAccountRateLimiter,
   validateRequest(loginSchema),
   login,
 );
@@ -30,13 +34,15 @@ authRoutes.post("/logout", authenticate, logout);
 
 authRoutes.post(
   "/forgot-password",
-  forgotPasswordRateLimiter,
+  forgotPasswordIpRateLimiter,
+  forgotPasswordEmailRateLimiter,
   validateRequest(forgotPasswordSchema),
   forgotPassword,
 );
 authRoutes.post(
   "/reset-password",
-  resetPasswordRateLimiter,
+  resetPasswordIpRateLimiter,
+  resetPasswordTokenRateLimiter,
   validateRequest(resetPasswordSchema),
   resetPassword,
 );

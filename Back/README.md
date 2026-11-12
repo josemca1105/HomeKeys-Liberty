@@ -37,7 +37,8 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Password policy with four character classes on every password defined through the API.
 - Mandatory password change for accounts created or reset by an ADMIN.
 - Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
-- Login rate limiting and a configurable CORS allowlist.
+- Per-IP, per-account and global rate limiting, with an optional Redis store for multiple instances.
+- A configurable CORS allowlist and Express `trust proxy` setting.
 - Hourly cleanup of expired revoked tokens.
 - Centralized validation and error handling, including 413 payload responses.
 - Automated HTTP integration tests with isolated Prisma test doubles.
@@ -109,6 +110,8 @@ Configure these variables in `.env`:
 | `JWT_SECRET` | Random secret with at least 32 characters. |
 | `PORT` | HTTP port; normally `3000`. |
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
+| `TRUST_PROXY` | Express `trust proxy` setting. Use `false` without a proxy, `1` behind one reverse proxy, or a comma-separated list of trusted proxy IPs/subnets. Defaults to `false`. |
+| `RATE_LIMIT_REDIS_URL` | Optional `redis://` or `rediss://` URL. When set, rate limit counters are shared across instances; when empty, each process uses in-memory counters. |
 | `SMTP_HOST` | SMTP server for recovery emails. Defaults to `smtp.gmail.com`. |
 | `SMTP_PORT` | SMTP port. Defaults to `465`. |
 | `SMTP_SECURE` | `true` for implicit TLS. Defaults to `true`. |
@@ -125,6 +128,14 @@ postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public
 ```
 
 Never commit the real `.env` file. It is excluded by `Back/.gitignore`; only `.env.example` should be committed.
+
+### Rate limiting and reverse proxies
+
+- If the API runs behind Nginx, a load balancer, Render, Railway or another reverse proxy, set `TRUST_PROXY` to the number of trusted hops or to a comma-separated list of trusted proxy IPs/subnets. Do not use `TRUST_PROXY=true` on the public internet: clients could forge `X-Forwarded-For` and bypass the limits.
+- Without a correct `TRUST_PROXY`, every request appears to come from the proxy IP. The per-IP limits would then block the whole user base instead of one client.
+- In-memory counters are per process and reset on restart. If the API runs more than one instance, set `RATE_LIMIT_REDIS_URL` so all instances share the counters.
+- If Redis is temporarily unavailable, the limiters fail open (`passOnStoreError`) to keep the API available; monitor the "Rate limit Redis error" log messages.
+- Global limits, per-account login limits, password change limits and administrator action limits are applied in addition to the per-IP limits.
 
 ## Installation and database setup
 
@@ -216,7 +227,7 @@ Possible responses:
 - `200`: authenticated successfully.
 - `400`: invalid request body.
 - `401`: invalid credentials.
-- `429`: too many failed login attempts; the current limit is 10 failures per 15 minutes per client.
+- `429`: too many failed login attempts; the limits are 5 failures per 15 minutes per account and 30 per client IP.
 
 ### List all users
 
@@ -460,7 +471,7 @@ Possible responses:
 
 - `200`: generic acknowledgment (always).
 - `400 VALIDATION_ERROR`: invalid email.
-- `429 TOO_MANY_RESET_ATTEMPTS`: more than 5 requests in 15 minutes per client.
+- `429 TOO_MANY_RESET_ATTEMPTS`: more than 5 requests in 15 minutes for the same email, or more than 20 per client IP.
 
 ### Reset a password
 
@@ -486,7 +497,7 @@ Possible responses:
 - `400 INVALID_RESET_TOKEN`: unknown token.
 - `400 RESET_TOKEN_ALREADY_USED`: the link was already used.
 - `400 RESET_TOKEN_EXPIRED`: the link expired; request a new one.
-- `429 TOO_MANY_RESET_ATTEMPTS`: more than 10 requests in 15 minutes per client.
+- `429 TOO_MANY_RESET_ATTEMPTS`: more than 10 requests in 15 minutes per client IP, or more than 5 for the same token.
 
 ## Mandatory password change
 
@@ -590,7 +601,7 @@ Notes:
 
 - `newUserPassword` must satisfy the password policy and differ from the current password, or the request returns `400 VALIDATION_ERROR`.
 - `Reset password` and `Change my password` copy `newUserPassword` into `loginPassword` on success, which is convenient when the tested user is the same one configured in `loginEmail`.
-- Rate limits: `forgot-password` allows 5 requests per 15 minutes and `reset-password` allows 10 per 15 minutes per client.
+- Rate limits: `login` allows 5 failures per account and 30 per client IP every 15 minutes; `forgot-password` allows 5 requests per email and 20 per client IP; `reset-password` allows 10 requests per client IP and 5 per token. Password changes allow 5 failures per user every 15 minutes.
 - Reusing an activation or recovery link returns `400 RESET_TOKEN_ALREADY_USED`; links older than their validity return `400 RESET_TOKEN_EXPIRED`.
 - Welcome emails never contain passwords; when the ADMIN sets an explicit password, the ADMIN communicates it through their own channel.
 
@@ -600,7 +611,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, login and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
@@ -672,7 +683,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Only SHA-256 token hashes are stored for logout revocation.
 - Expired revoked tokens are removed at startup and every hour.
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
-- Login attempts are rate limited and browser origins are restricted by `CORS_ORIGINS`.
+- Login attempts are rate limited per account and per IP; password changes, administrator mutations, forgot-password and reset-password have dedicated limits; a global API limit covers the remaining routes. Browser origins are restricted by `CORS_ORIGINS`, and `TRUST_PROXY` controls how client IPs are derived behind a reverse proxy. Set `RATE_LIMIT_REDIS_URL` to share the counters across multiple instances.
 - New passwords are limited to 72 UTF-8 bytes to prevent silent bcrypt truncation.
 - Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are shown only once in the creation response, and are stored only as bcrypt hashes.
 - The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.

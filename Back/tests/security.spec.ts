@@ -8,6 +8,8 @@ import { cleanupExpiredRevokedTokens } from "../src/services/token-cleanup-servi
 import {
   createMockDatabase,
   createRevokedTokenFixture,
+  TEST_ADMIN_PASSWORD,
+  TEST_CHANGED_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
 
@@ -41,12 +43,16 @@ describe("Security and maintenance HTTP integration", { concurrency: false }, ()
     assert.equal(response.body.code, "CORS_ORIGIN_DENIED");
   });
 
-  it("rate limits repeated failed login attempts", async () => {
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+  it("applies the configured trust proxy setting", () => {
+    assert.deepEqual(app.get("trust proxy"), environment.TRUST_PROXY);
+  });
+
+  it("rate limits repeated failed login attempts for one account", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       const response = await request(app)
         .post("/api/v1/auth/login")
         .send({
-          email: `unknown-${attempt}@example.com`,
+          email: "unknown@example.com",
           password: "Wrong-Password1!",
         });
 
@@ -56,12 +62,48 @@ describe("Security and maintenance HTTP integration", { concurrency: false }, ()
     const blockedResponse = await request(app)
       .post("/api/v1/auth/login")
       .send({
-        email: "unknown-blocked@example.com",
+        email: "unknown@example.com",
         password: "Wrong-Password1!",
       });
 
     assert.equal(blockedResponse.status, 429);
     assert.equal(blockedResponse.body.code, "TOO_MANY_LOGIN_ATTEMPTS");
+  });
+
+  it("rate limits repeated password change failures", async () => {
+    const loginResponse = await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email: "admin@example.com", password: TEST_ADMIN_PASSWORD });
+
+    assert.equal(loginResponse.status, 200);
+    const adminToken = loginResponse.body.data.token as string;
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await request(app)
+        .patch("/api/v1/users/me/password")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({
+          currentPassword: "Wrong-Password1!",
+          newPassword: TEST_CHANGED_PASSWORD,
+        });
+
+      assert.equal(response.status, 401);
+      assert.equal(response.body.code, "INVALID_CURRENT_PASSWORD");
+    }
+
+    const blockedResponse = await request(app)
+      .patch("/api/v1/users/me/password")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        currentPassword: "Wrong-Password1!",
+        newPassword: TEST_CHANGED_PASSWORD,
+      });
+
+    assert.equal(blockedResponse.status, 429);
+    assert.equal(
+      blockedResponse.body.code,
+      "TOO_MANY_PASSWORD_CHANGE_ATTEMPTS",
+    );
   });
 
   it("rate limits password recovery requests", async () => {

@@ -5,6 +5,7 @@ import { environment } from "./config/env";
 import { AppError } from "./utils/app-error";
 import { errorHandler } from "./middleware/error-handler";
 import { notFoundHandler } from "./middleware/not-found-handler";
+import { apiRateLimiter } from "./middleware/rate-limiters";
 import { apiRoutes } from "./routes";
 
 const createCorsOptions = (): CorsOptions => {
@@ -33,8 +34,10 @@ export const createApp = (): Express => {
   const app = express();
 
   app.disable("x-powered-by");
+  app.set("trust proxy", environment.TRUST_PROXY);
   app.use(helmet());
   app.use(cors(createCorsOptions()));
+  app.use(apiRateLimiter);
   app.use(express.json({ limit: "10kb" }));
 
   app.use("/api/v1", apiRoutes);

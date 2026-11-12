@@ -10,6 +10,31 @@ const parseCorsOrigins = (value: string): string[] => {
     .filter((origin) => origin.length > 0);
 };
 
+type TrustProxySetting = boolean | number | string[];
+
+const parseTrustProxy = (value: string): TrustProxySetting => {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "" || normalized === "false") {
+    return false;
+  }
+
+  const hops = Number(normalized);
+
+  if (Number.isInteger(hops) && hops >= 0) {
+    return hops;
+  }
+
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+};
+
 const hasOnlyValidCorsOrigins = (origins: string[]): boolean => {
   return (
     origins.length > 0 &&
@@ -36,6 +61,17 @@ const environmentSchema = z.object({
     .transform(parseCorsOrigins)
     .refine(hasOnlyValidCorsOrigins, {
       message: "CORS_ORIGINS must contain valid comma-separated URLs.",
+    }),
+  TRUST_PROXY: z
+    .string()
+    .default("false")
+    .transform(parseTrustProxy),
+  RATE_LIMIT_REDIS_URL: z
+    .string()
+    .default("")
+    .transform((value) => value.trim())
+    .refine((value) => value === "" || /^rediss?:\/\//i.test(value), {
+      message: "RATE_LIMIT_REDIS_URL must be a redis:// or rediss:// URL.",
     }),
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),

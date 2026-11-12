@@ -22,7 +22,7 @@ const extractResetToken = (mail: OutgoingMail): string => {
   return match[1] as string;
 };
 
-// The forgot-password rate limiter allows 5 requests per 15 minutes and its
+// The forgot-password email limiter allows 5 requests per 15 minutes and its
 // in-memory store is shared by every test in this file, so the tests below use
 // exactly 5 forgot-password calls in total. The limiter itself is covered in
 // security.spec.ts, which runs in its own process.

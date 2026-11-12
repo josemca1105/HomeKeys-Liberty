@@ -11,6 +11,10 @@ import {
 import { authenticate } from "../middleware/authenticate";
 import { enforcePasswordChange } from "../middleware/enforce-password-change";
 import { isAdmin } from "../middleware/is-admin";
+import {
+  passwordChangeRateLimiter,
+  userManagementRateLimiter,
+} from "../middleware/rate-limiters";
 import { validateParams } from "../middleware/validate-params";
 import { validateRequest } from "../middleware/validate-request";
 import {
@@ -27,6 +31,7 @@ userRoutes.post(
   authenticate,
   enforcePasswordChange,
   isAdmin,
+  userManagementRateLimiter,
   validateRequest(createUserSchema),
   addUser,
 );
@@ -38,6 +43,7 @@ userRoutes.patch(
   "/me/password",
   authenticate,
   validateRequest(changePasswordSchema),
+  passwordChangeRateLimiter,
   changeMyPassword,
 );
 
@@ -46,6 +52,7 @@ userRoutes.patch(
   authenticate,
   enforcePasswordChange,
   isAdmin,
+  userManagementRateLimiter,
   validateParams(userIdParamsSchema),
   validateRequest(updateUserSchema),
   updateUser,
@@ -56,6 +63,7 @@ userRoutes.delete(
   authenticate,
   enforcePasswordChange,
   isAdmin,
+  userManagementRateLimiter,
   validateParams(userIdParamsSchema),
   removeUser,
 );
