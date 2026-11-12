@@ -1,6 +1,8 @@
 import type { Prisma, Role, User } from "@prisma/client";
 import { prisma } from "../config/database";
 
+type UserRepositoryClient = Prisma.TransactionClient | typeof prisma;
+
 const userResponseSelect = {
   id: true,
   firstName: true,
@@ -96,8 +98,9 @@ export const findAllUsers = async (): Promise<UserResponseRecord[]> => {
 
 export const findUserById = async (
   userId: number,
+  client: UserRepositoryClient = prisma,
 ): Promise<UserResponseRecord | null> => {
-  return prisma.user.findUnique({
+  return client.user.findUnique({
     where: { id: userId },
     select: userResponseSelect,
   });
@@ -114,8 +117,9 @@ export const createUserRecord = async (
 export const updateUserRecord = async (
   userId: number,
   userData: UpdateUserData,
+  client: UserRepositoryClient = prisma,
 ): Promise<User> => {
-  return prisma.user.update({
+  return client.user.update({
     where: { id: userId },
     data: userData,
   });
@@ -126,47 +130,66 @@ export const updateUserRecord = async (
 export const updateUserAndInvalidateResetTokens = async (
   userId: number,
   userData: UpdateUserData,
+  transaction?: Prisma.TransactionClient,
 ): Promise<User> => {
-  return prisma.$transaction(async (transaction) => {
-    // Token rows are locked before the user row to keep the same lock order
-    // as password resets and avoid PostgreSQL deadlocks.
-    await transaction.passwordResetToken.deleteMany({
-      where: { userId },
-    });
+  if (!transaction) {
+    return prisma.$transaction((currentTransaction) =>
+      updateUserAndInvalidateResetTokens(
+        userId,
+        userData,
+        currentTransaction,
+      ),
+    );
+  }
 
-    return transaction.user.update({
-      where: { id: userId },
-      data: userData,
-    });
+  // Token rows are locked before the user row to keep the same lock order
+  // as password resets and avoid PostgreSQL deadlocks.
+  await transaction.passwordResetToken.deleteMany({
+    where: { userId },
+  });
+
+  return transaction.user.update({
+    where: { id: userId },
+    data: userData,
   });
 };
 
-export const countUsersByRole = async (role: Role): Promise<number> => {
-  return prisma.user.count({
+export const countUsersByRole = async (
+  role: Role,
+  client: UserRepositoryClient = prisma,
+): Promise<number> => {
+  return client.user.count({
     where: { role },
   });
 };
 
 export const countPropertiesByAgentId = async (
   agentId: number,
+  client: UserRepositoryClient = prisma,
 ): Promise<number> => {
-  return prisma.property.count({
+  return client.property.count({
     where: { agentId },
   });
 };
 
 export const deleteUserWithRelatedTokens = async (
   userId: number,
+  transaction?: Prisma.TransactionClient,
 ): Promise<void> => {
-  await prisma.$transaction(async (transaction) => {
-    await transaction.revokedToken.deleteMany({
-      where: { userId },
-    });
-    await transaction.passwordResetToken.deleteMany({
-      where: { userId },
-    });
-    await transaction.user.delete({
-      where: { id: userId },
-    });
+  if (!transaction) {
+    await prisma.$transaction((currentTransaction) =>
+      deleteUserWithRelatedTokens(userId, currentTransaction),
+    );
+    return;
+  }
+
+  await transaction.revokedToken.deleteMany({
+    where: { userId },
+  });
+  await transaction.passwordResetToken.deleteMany({
+    where: { userId },
+  });
+  await transaction.user.delete({
+    where: { id: userId },
   });
 };

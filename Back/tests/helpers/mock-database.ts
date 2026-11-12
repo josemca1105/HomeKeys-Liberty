@@ -557,16 +557,35 @@ export const createMockDatabase = (): MockDatabase => {
     passwordResetToken: passwordResetTokenDelegate,
   };
 
+  let serializableTransactionQueue: Promise<unknown> = Promise.resolve();
+
   const prismaWithTransaction = prisma as unknown as {
     $transaction: <T>(
       fn: (transaction: TransactionClientMock) => Promise<T>,
+      options?: { isolationLevel?: string },
     ) => Promise<T>;
   };
 
   prismaWithTransaction.$transaction = async <T>(
     fn: (transaction: TransactionClientMock) => Promise<T>,
+    options?: { isolationLevel?: string },
   ): Promise<T> => {
-    return fn(transactionClient);
+    if (options?.isolationLevel !== "Serializable") {
+      return fn(transactionClient);
+    }
+
+    // Simulates PostgreSQL serializing concurrent serializable transactions
+    // so the last-ADMIN race regression test is deterministic.
+    const serializedRun = serializableTransactionQueue.then(() =>
+      fn(transactionClient),
+    );
+
+    serializableTransactionQueue = serializedRun.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return serializedRun;
   };
 
   return {

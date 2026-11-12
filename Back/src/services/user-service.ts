@@ -13,6 +13,7 @@ import {
   updateUserRecord,
   type UpdateUserData,
 } from "../repositories/user-repository";
+import { runSerializableTransaction } from "../repositories/serializable-transaction";
 import {
   INVITATION_TOKEN_TTL_MINUTES,
   issuePasswordResetToken,
@@ -214,17 +215,17 @@ export const updateUserByAdmin = async (
   input: UpdateUserInput,
   actingUserId: number,
 ): Promise<UserUpdateResult> => {
-  const targetUser = await findUserById(targetUserId);
+  const currentTarget = await findUserById(targetUserId);
 
-  if (!targetUser) {
+  if (!currentTarget) {
     throw userNotFoundError("actualizar");
   }
 
   const newEmail = input.email;
-  const isChangingEmail =
-    newEmail !== undefined && newEmail !== targetUser.email;
+  const isEmailChangingFromSnapshot =
+    newEmail !== undefined && newEmail !== currentTarget.email;
 
-  if (isChangingEmail) {
+  if (isEmailChangingFromSnapshot) {
     const existingUser = await findUserByEmail(newEmail);
 
     if (existingUser) {
@@ -232,41 +233,72 @@ export const updateUserByAdmin = async (
     }
   }
 
-  const isDemotingAdmin =
-    input.role !== undefined &&
-    input.role !== Role.ADMIN &&
-    targetUser.role === Role.ADMIN;
-
-  if (isDemotingAdmin) {
-    const adminCount = await countUsersByRole(Role.ADMIN);
-
-    if (adminCount <= 1) {
-      throw lastAdminRequiredError();
-    }
-  }
-
-  const updateData: UpdateUserData = {
-    ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
-    ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
-    ...(input.email !== undefined ? { email: input.email } : {}),
-    ...(input.phone !== undefined ? { phone: input.phone } : {}),
-    ...(input.photoUrl !== undefined ? { photoUrl: input.photoUrl } : {}),
-    ...(input.role !== undefined ? { role: input.role } : {}),
-  };
-
   const isChangingPassword = input.password !== undefined;
-  const shouldInvalidateResetTokens = isChangingPassword || isChangingEmail;
-
-  if (input.password !== undefined) {
-    updateData.passwordHash = await hashPassword(input.password);
-    updateData.passwordChangedAt = passwordChangeTimestamp();
-    updateData.mustChangePassword = true;
-  }
+  const passwordHash =
+    input.password !== undefined ? await hashPassword(input.password) : null;
 
   try {
-    const updatedUser = shouldInvalidateResetTokens
-      ? await updateUserAndInvalidateResetTokens(targetUserId, updateData)
-      : await updateUserRecord(targetUserId, updateData);
+    const updatedUser = await runSerializableTransaction(
+      async (transaction) => {
+        const targetUser = await findUserById(targetUserId, transaction);
+
+        if (!targetUser) {
+          throw userNotFoundError("actualizar");
+        }
+
+        const isDemotingAdmin =
+          input.role !== undefined &&
+          input.role !== Role.ADMIN &&
+          targetUser.role === Role.ADMIN;
+
+        if (isDemotingAdmin) {
+          const adminCount = await countUsersByRole(
+            Role.ADMIN,
+            transaction,
+          );
+
+          if (adminCount <= 1) {
+            throw lastAdminRequiredError();
+          }
+        }
+
+        const isChangingEmail =
+          newEmail !== undefined && newEmail !== targetUser.email;
+
+        const updateData: UpdateUserData = {
+          ...(input.firstName !== undefined
+            ? { firstName: input.firstName }
+            : {}),
+          ...(input.lastName !== undefined
+            ? { lastName: input.lastName }
+            : {}),
+          ...(newEmail !== undefined ? { email: newEmail } : {}),
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+          ...(input.photoUrl !== undefined
+            ? { photoUrl: input.photoUrl }
+            : {}),
+          ...(input.role !== undefined ? { role: input.role } : {}),
+        };
+
+        if (passwordHash !== null) {
+          updateData.passwordHash = passwordHash;
+          updateData.passwordChangedAt = passwordChangeTimestamp();
+          updateData.mustChangePassword = true;
+        }
+
+        const shouldInvalidateResetTokens =
+          isChangingPassword || isChangingEmail;
+
+        return shouldInvalidateResetTokens
+          ? updateUserAndInvalidateResetTokens(
+              targetUserId,
+              updateData,
+              transaction,
+            )
+          : updateUserRecord(targetUserId, updateData, transaction);
+      },
+    );
+
     const isOwnPasswordChange =
       isChangingPassword && targetUserId === actingUserId;
 
@@ -311,34 +343,60 @@ export const deleteUserByAdmin = async (
   targetUserId: number,
   actingUserId: number,
 ): Promise<number> => {
-  const targetUser = await findUserById(targetUserId);
+  try {
+    return await runSerializableTransaction(async (transaction) => {
+      const targetUser = await findUserById(targetUserId, transaction);
 
-  if (!targetUser) {
-    throw userNotFoundError("eliminar");
-  }
+      if (!targetUser) {
+        throw userNotFoundError("eliminar");
+      }
 
-  // A sole ADMIN deleting itself is reported as LAST_ADMIN_REQUIRED because
-  // the system would be left without administrators; self deletion is only
-  // reported when at least one other ADMIN remains.
-  if (targetUser.role === Role.ADMIN) {
-    const adminCount = await countUsersByRole(Role.ADMIN);
+      // A sole ADMIN deleting itself is reported as LAST_ADMIN_REQUIRED
+      // because the system would be left without administrators; self
+      // deletion is only reported when at least one other ADMIN remains.
+      if (targetUser.role === Role.ADMIN) {
+        const adminCount = await countUsersByRole(
+          Role.ADMIN,
+          transaction,
+        );
 
-    if (adminCount <= 1) {
-      throw lastAdminRequiredError();
+        if (adminCount <= 1) {
+          throw lastAdminRequiredError();
+        }
+      }
+
+      if (targetUserId === actingUserId) {
+        throw selfDeletionNotAllowedError();
+      }
+
+      const propertyCount = await countPropertiesByAgentId(
+        targetUserId,
+        transaction,
+      );
+
+      if (propertyCount > 0) {
+        throw userHasPropertiesError();
+      }
+
+      await deleteUserWithRelatedTokens(targetUserId, transaction);
+
+      return targetUserId;
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003"
+    ) {
+      throw userHasPropertiesError();
     }
+
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      throw userNotFoundError("eliminar");
+    }
+
+    throw error;
   }
-
-  if (targetUserId === actingUserId) {
-    throw selfDeletionNotAllowedError();
-  }
-
-  const propertyCount = await countPropertiesByAgentId(targetUserId);
-
-  if (propertyCount > 0) {
-    throw userHasPropertiesError();
-  }
-
-  await deleteUserWithRelatedTokens(targetUserId);
-
-  return targetUserId;
 };

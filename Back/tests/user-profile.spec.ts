@@ -596,6 +596,47 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(listResponse.body.code, "ADMIN_REQUIRED");
   });
 
+  it("keeps one ADMIN when two admins demote themselves concurrently", async () => {
+    database.addUser({
+      id: 3,
+      email: "second-admin@example.com",
+      role: Role.ADMIN,
+      password: TEST_NEW_USER_PASSWORD,
+    });
+
+    const firstAdminToken = await login(
+      "admin@example.com",
+      TEST_ADMIN_PASSWORD,
+    );
+    const secondAdminToken = await login(
+      "second-admin@example.com",
+      TEST_NEW_USER_PASSWORD,
+    );
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app)
+        .patch("/api/v1/users/1")
+        .set("Authorization", `Bearer ${firstAdminToken}`)
+        .send({ role: Role.PARTNER }),
+      request(app)
+        .patch("/api/v1/users/3")
+        .set("Authorization", `Bearer ${secondAdminToken}`)
+        .send({ role: Role.PARTNER }),
+    ]);
+
+    const statuses = [firstResponse.status, secondResponse.status].sort();
+    assert.deepEqual(statuses, [200, 409]);
+
+    const rejectedResponse =
+      firstResponse.status === 409 ? firstResponse : secondResponse;
+    assert.equal(rejectedResponse.body.code, "LAST_ADMIN_REQUIRED");
+
+    const remainingAdmins = database.users.filter(
+      (user) => user.role === Role.ADMIN,
+    );
+    assert.equal(remainingAdmins.length, 1);
+  });
+
   it("returns USER_NOT_FOUND when updating a nonexistent user", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
