@@ -131,7 +131,7 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
 export const resetUserPassword = async (
   token: string,
   newPassword: string,
-): Promise<void> => {
+): Promise<number> => {
   const tokenRecord = await findPasswordResetTokenByHash(hashToken(token));
 
   if (!tokenRecord) {
@@ -164,4 +164,6 @@ export const resetUserPassword = async (
   if (!wasApplied) {
     throw await resolveResetTokenFailure(token);
   }
+
+  return tokenRecord.userId;
 };

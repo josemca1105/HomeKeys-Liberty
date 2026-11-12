@@ -1,4 +1,6 @@
+import { AuditScope } from "@prisma/client";
 import { authenticateUser, revokeCurrentToken } from "../services/auth-service";
+import { recordAuditEvent } from "../services/audit-service";
 import {
   requestPasswordReset,
   resetUserPassword,
@@ -6,14 +8,41 @@ import {
 import type {
   ForgotPasswordInput,
   LoginInput,
+  LoginResult,
   ResetPasswordInput,
 } from "../types/auth";
 import { AppError } from "../utils/app-error";
+import { getAuditActor, getAuditRequestContext } from "../utils/audit-context";
 import { asyncHandler } from "../utils/async-handler";
 
 export const login = asyncHandler(async (req, res): Promise<void> => {
   const credentials = req.body as LoginInput;
-  const result = await authenticateUser(credentials);
+  let result: LoginResult;
+
+  try {
+    result = await authenticateUser(credentials);
+  } catch (error) {
+    await recordAuditEvent({
+      scope: AuditScope.SECURITY,
+      action: "LOGIN_FAILED",
+      actor: { email: credentials.email },
+      request: getAuditRequestContext(req),
+    });
+    throw error;
+  }
+
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "LOGIN_SUCCEEDED",
+    actor: {
+      id: result.user.id,
+      role: result.user.role,
+      email: result.user.email,
+    },
+    entityType: "USER",
+    entityId: result.user.id,
+    request: getAuditRequestContext(req),
+  });
 
   res.status(200).json({
     success: true,
@@ -33,6 +62,15 @@ export const logout = asyncHandler(async (req, res): Promise<void> => {
 
   await revokeCurrentToken(req.auth);
 
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "LOGOUT",
+    actor: getAuditActor(req.auth),
+    entityType: "USER",
+    entityId: req.auth.userId,
+    request: getAuditRequestContext(req),
+  });
+
   res.status(200).json({
     success: true,
     message: "Sesión cerrada exitosamente.",
@@ -43,6 +81,13 @@ export const forgotPassword = asyncHandler(async (req, res): Promise<void> => {
   const { email } = req.body as ForgotPasswordInput;
 
   await requestPasswordReset(email);
+
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "PASSWORD_RESET_REQUESTED",
+    actor: { email },
+    request: getAuditRequestContext(req),
+  });
 
   res.status(200).json({
     success: true,
@@ -55,7 +100,16 @@ export const forgotPassword = asyncHandler(async (req, res): Promise<void> => {
 export const resetPassword = asyncHandler(async (req, res): Promise<void> => {
   const { token, newPassword } = req.body as ResetPasswordInput;
 
-  await resetUserPassword(token, newPassword);
+  const userId = await resetUserPassword(token, newPassword);
+
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "PASSWORD_RESET",
+    actor: { id: userId },
+    entityType: "USER",
+    entityId: userId,
+    request: getAuditRequestContext(req),
+  });
 
   res.status(200).json({
     success: true,

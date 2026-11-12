@@ -1,5 +1,11 @@
 import { Prisma, Role } from "@prisma/client";
-import type { PasswordResetToken, RevokedToken, User } from "@prisma/client";
+import type {
+  AuditLog,
+  AuditScope,
+  PasswordResetToken,
+  RevokedToken,
+  User,
+} from "@prisma/client";
 import bcrypt from "bcrypt";
 import { prisma } from "../../src/config/database";
 
@@ -191,6 +197,49 @@ interface PasswordResetTokenDelegateMock {
   ) => Promise<{ count: number }>;
 }
 
+interface AuditLogWhereMock {
+  scope?: AuditScope;
+  action?: string;
+  actorId?: number;
+  entityType?: string;
+  entityId?: number;
+  createdAt?: {
+    gte?: Date;
+    lte?: Date;
+    lt?: Date;
+  };
+}
+
+interface CreateAuditLogArgs {
+  data: {
+    scope: AuditScope;
+    actorId: number | null;
+    actorRole: Role | null;
+    actorEmail: string | null;
+    action: string;
+    entityType: string | null;
+    entityId: number | null;
+    changes?: Prisma.InputJsonValue;
+    ip: string | null;
+    userAgent: string | null;
+    requestId: string | null;
+  };
+}
+
+interface AuditLogDelegateMock {
+  create: (args: CreateAuditLogArgs) => Promise<AuditLog>;
+  findMany: (args: {
+    where?: AuditLogWhereMock;
+    orderBy?: Array<Record<string, string>>;
+    skip?: number;
+    take?: number;
+  }) => Promise<AuditLog[]>;
+  count: (args: { where?: AuditLogWhereMock }) => Promise<number>;
+  deleteMany: (args: {
+    where: { createdAt?: { lt?: Date } };
+  }) => Promise<{ count: number }>;
+}
+
 interface TransactionClientMock {
   user: UserDelegateMock;
   property: PropertyDelegateMock;
@@ -202,6 +251,7 @@ export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
+  auditLogs: AuditLog[];
   getUserCreateCallCount: () => number;
   getUserFindManyCallCount: () => number;
   setEmptyUserList: () => void;
@@ -275,6 +325,7 @@ export const createMockDatabase = (): MockDatabase => {
   ];
   const revokedTokens: RevokedToken[] = [];
   const passwordResetTokens: PasswordResetToken[] = [];
+  const auditLogs: AuditLog[] = [];
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
   let userCreateCallCount = 0;
@@ -287,6 +338,8 @@ export const createMockDatabase = (): MockDatabase => {
     prisma.revokedToken as unknown as RevokedTokenDelegateMock;
   const passwordResetTokenDelegate =
     prisma.passwordResetToken as unknown as PasswordResetTokenDelegateMock;
+  const auditLogDelegate =
+    prisma.auditLog as unknown as AuditLogDelegateMock;
 
   const findUserRecord = (args: FindUserArgs): User | null => {
     const user = users.find((candidate) => {
@@ -706,6 +759,131 @@ export const createMockDatabase = (): MockDatabase => {
     return { count: tokensToDelete.length };
   };
 
+  const matchesAuditLogWhere = (
+    log: AuditLog,
+    where: AuditLogWhereMock | undefined,
+  ): boolean => {
+    if (where === undefined) {
+      return true;
+    }
+
+    if (where.scope !== undefined && log.scope !== where.scope) {
+      return false;
+    }
+
+    if (where.action !== undefined && log.action !== where.action) {
+      return false;
+    }
+
+    if (where.actorId !== undefined && log.actorId !== where.actorId) {
+      return false;
+    }
+
+    if (where.entityType !== undefined && log.entityType !== where.entityType) {
+      return false;
+    }
+
+    if (where.entityId !== undefined && log.entityId !== where.entityId) {
+      return false;
+    }
+
+    if (where.createdAt !== undefined) {
+      if (
+        where.createdAt.gte !== undefined &&
+        log.createdAt.getTime() < where.createdAt.gte.getTime()
+      ) {
+        return false;
+      }
+
+      if (
+        where.createdAt.lte !== undefined &&
+        log.createdAt.getTime() > where.createdAt.lte.getTime()
+      ) {
+        return false;
+      }
+
+      if (
+        where.createdAt.lt !== undefined &&
+        log.createdAt.getTime() >= where.createdAt.lt.getTime()
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  auditLogDelegate.create = async (
+    args: CreateAuditLogArgs,
+  ): Promise<AuditLog> => {
+    const nextId =
+      auditLogs.length > 0
+        ? Math.max(...auditLogs.map((log) => log.id)) + 1
+        : 1;
+
+    const auditLog: AuditLog = {
+      id: nextId,
+      scope: args.data.scope,
+      actorId: args.data.actorId,
+      actorRole: args.data.actorRole,
+      actorEmail: args.data.actorEmail,
+      action: args.data.action,
+      entityType: args.data.entityType,
+      entityId: args.data.entityId,
+      changes: (args.data.changes ?? null) as Prisma.JsonValue,
+      ip: args.data.ip,
+      userAgent: args.data.userAgent,
+      requestId: args.data.requestId,
+      createdAt: new Date(),
+    };
+
+    auditLogs.push(auditLog);
+    return { ...auditLog };
+  };
+
+  auditLogDelegate.findMany = async (args): Promise<AuditLog[]> => {
+    const matchingLogs = auditLogs.filter((log) =>
+      matchesAuditLogWhere(log, args.where),
+    );
+    const orderedLogs = [...matchingLogs].sort(
+      (first, second) =>
+        second.createdAt.getTime() - first.createdAt.getTime() ||
+        second.id - first.id,
+    );
+    const skip = args.skip ?? 0;
+    const take = args.take ?? orderedLogs.length;
+
+    return orderedLogs
+      .slice(skip, skip + take)
+      .map((log) => ({ ...log }));
+  };
+
+  auditLogDelegate.count = async (args): Promise<number> => {
+    return auditLogs.filter((log) =>
+      matchesAuditLogWhere(log, args.where),
+    ).length;
+  };
+
+  auditLogDelegate.deleteMany = async (
+    args,
+  ): Promise<{ count: number }> => {
+    const cutoff = args.where.createdAt?.lt;
+
+    if (cutoff === undefined) {
+      return { count: 0 };
+    }
+
+    const expiredLogs = auditLogs.filter(
+      (log) => log.createdAt.getTime() < cutoff.getTime(),
+    );
+    const remainingLogs = auditLogs.filter(
+      (log) => log.createdAt.getTime() >= cutoff.getTime(),
+    );
+
+    auditLogs.splice(0, auditLogs.length, ...remainingLogs);
+    return { count: expiredLogs.length };
+  };
+
   const transactionClient: TransactionClientMock = {
     user: userDelegate,
     property: propertyDelegate,
@@ -748,6 +926,7 @@ export const createMockDatabase = (): MockDatabase => {
     users,
     revokedTokens,
     passwordResetTokens,
+    auditLogs,
     getUserCreateCallCount: (): number => userCreateCallCount,
     getUserFindManyCallCount: (): number => userFindManyCallCount,
     setEmptyUserList: (): void => {

@@ -1,11 +1,14 @@
 import cors, { type CorsOptions } from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
+import pinoHttp from "pino-http";
 import { environment } from "./config/env";
+import { createLogger } from "./config/logger";
 import { AppError } from "./utils/app-error";
 import { errorHandler } from "./middleware/error-handler";
 import { notFoundHandler } from "./middleware/not-found-handler";
 import { apiRateLimiter } from "./middleware/rate-limiters";
+import { requestContext } from "./middleware/request-context";
 import { apiRoutes } from "./routes";
 
 const createCorsOptions = (): CorsOptions => {
@@ -33,8 +36,18 @@ const createCorsOptions = (): CorsOptions => {
 export const createApp = (): Express => {
   const app = express();
 
+  const logger = createLogger();
+
   app.disable("x-powered-by");
   app.set("trust proxy", environment.TRUST_PROXY);
+  app.use(requestContext);
+  app.use(
+    pinoHttp({
+      logger,
+      genReqId: (req) =>
+        (req as { requestId?: string }).requestId ?? "unknown",
+    }),
+  );
   app.use(helmet());
   app.use(cors(createCorsOptions()));
   app.use(apiRateLimiter);

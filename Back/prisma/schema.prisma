@@ -32,6 +32,11 @@ enum Role {
   PARTNER
 }
 
+enum AuditScope {
+  SECURITY
+  BUSINESS
+}
+
 enum Category {
   House
   Apartment
@@ -150,4 +155,30 @@ model PasswordResetToken {
   @@index([expiresAt])
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Append-only security and business activity log. It deliberately has no
+// foreign keys so deleting a user never deletes the history of their actions.
+model AuditLog {
+  id         Int        @id @default(autoincrement())
+  scope      AuditScope
+  actorId    Int?       @map("actor_id")
+  actorRole  Role?      @map("actor_role")
+  actorEmail String?    @map("actor_email") @db.VarChar(255)
+  action     String     @db.VarChar(80)
+  entityType String?    @map("entity_type") @db.VarChar(40)
+  entityId   Int?       @map("entity_id")
+  changes    Json?
+  ip         String?    @db.VarChar(45)
+  userAgent  String?    @map("user_agent") @db.VarChar(512)
+  requestId  String?    @map("request_id") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt, id])
+  @@index([actorId, createdAt])
+  @@index([scope, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@map("audit_logs")
 }

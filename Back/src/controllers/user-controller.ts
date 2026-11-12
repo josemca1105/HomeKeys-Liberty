@@ -1,3 +1,5 @@
+import { AuditScope } from "@prisma/client";
+import { recordAuditEvent } from "../services/audit-service";
 import {
   changeOwnPassword,
   deleteUserByAdmin,
@@ -13,11 +15,26 @@ import type {
   UpdateUserInput,
 } from "../types/user";
 import { AppError } from "../utils/app-error";
+import { getAuditActor, getAuditRequestContext } from "../utils/audit-context";
 import { asyncHandler } from "../utils/async-handler";
 
 export const addUser = asyncHandler(async (req, res): Promise<void> => {
   const userData = req.body as CreateUserInput;
   const { user, invitationSent } = await registerUser(userData);
+
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "USER_CREATED",
+    actor: getAuditActor(req.auth),
+    entityType: "USER",
+    entityId: user.id,
+    changes: {
+      email: user.email,
+      role: user.role,
+      invitationSent,
+    },
+    request: getAuditRequestContext(req),
+  });
 
   res.status(201).json({
     success: true,
@@ -82,6 +99,16 @@ export const changeMyPassword = asyncHandler(async (req, res): Promise<void> => 
   const input = req.body as ChangePasswordInput;
   const { user, token } = await changeOwnPassword(session.userId, input);
 
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "PASSWORD_CHANGED",
+    actor: getAuditActor(session, user.email),
+    entityType: "USER",
+    entityId: user.id,
+    changes: { mustChangePassword: user.mustChangePassword },
+    request: getAuditRequestContext(req),
+  });
+
   res.status(200).json({
     success: true,
     message: "Contraseña actualizada exitosamente.",
@@ -108,6 +135,22 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
     session.userId,
   );
 
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action:
+      input.password !== undefined ? "USER_PASSWORD_RESET" : "USER_UPDATED",
+    actor: getAuditActor(session),
+    entityType: "USER",
+    entityId: user.id,
+    changes: {
+      fields: Object.keys(input).filter((field) => field !== "password"),
+      passwordChanged: input.password !== undefined,
+      email: user.email,
+      role: user.role,
+    },
+    request: getAuditRequestContext(req),
+  });
+
   res.status(200).json({
     success: true,
     message: "Usuario actualizado exitosamente.",
@@ -128,6 +171,16 @@ export const removeUser = asyncHandler(async (req, res): Promise<void> => {
 
   const userId = Number(req.params.id);
   const deletedId = await deleteUserByAdmin(userId, session.userId);
+
+  await recordAuditEvent({
+    scope: AuditScope.SECURITY,
+    action: "USER_DELETED",
+    actor: getAuditActor(session),
+    entityType: "USER",
+    entityId: deletedId,
+    changes: { deletedId },
+    request: getAuditRequestContext(req),
+  });
 
   res.status(200).json({
     success: true,

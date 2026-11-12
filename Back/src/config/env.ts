@@ -72,6 +72,15 @@ const environmentSchema = z.object({
     .refine((value) => value === "" || /^rediss?:\/\//i.test(value), {
       message: "RATE_LIMIT_REDIS_URL must be a redis:// or rediss:// URL.",
     }),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
+  AUDIT_RETENTION_MONTHS: z.coerce
+    .number()
+    .int()
+    .min(12, "AUDIT_RETENTION_MONTHS must be at least 12.")
+    .max(120, "AUDIT_RETENTION_MONTHS cannot exceed 120.")
+    .default(24),
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
   SMTP_SECURE: z

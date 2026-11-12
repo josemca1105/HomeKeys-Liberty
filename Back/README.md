@@ -30,7 +30,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - JWT revocation through SHA-256 token hashes.
 - Current user and role revalidation against PostgreSQL on protected routes.
 - ADMIN authorization for user creation and PARTNER as the default role.
-- ADMIN user listing and profile lookup, with PARTNER limited to its own profile.
+- ADMIN user listing with pagination, search, role filters and sorting; PARTNER is limited to its own profile.
 - ADMIN user editing and deletion with last-admin, self-deletion, and property-relation protections.
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
 - Automatic email invitations for administrator-created users, with a single-use activation link.
@@ -39,7 +39,10 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
 - Per-IP, per-account and global rate limiting, with an optional Redis store for multiple instances.
 - A configurable CORS allowlist and Express `trust proxy` setting.
-- Hourly cleanup of expired revoked tokens.
+- Append-only security and business audit history, with ADMIN-wide visibility and PARTNER-scoped visibility.
+- Structured pino request logs with request IDs and secret redaction.
+- 24-month audit retention (configurable with `AUDIT_RETENTION_MONTHS`).
+- Hourly cleanup of expired revoked tokens and expired audit rows.
 - Centralized validation and error handling, including 413 payload responses.
 - Automated HTTP integration tests with isolated Prisma test doubles.
 - Helmet security headers.
@@ -112,6 +115,8 @@ Configure these variables in `.env`:
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
 | `TRUST_PROXY` | Express `trust proxy` setting. Use `false` without a proxy, `1` behind one reverse proxy, or a comma-separated list of trusted proxy IPs/subnets. Defaults to `false`. |
 | `RATE_LIMIT_REDIS_URL` | Optional `redis://` or `rediss://` URL. When set, rate limit counters are shared across instances; when empty, each process uses in-memory counters. |
+| `LOG_LEVEL` | Pino log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`. Defaults to `info`; tests force `silent`. |
+| `AUDIT_RETENTION_MONTHS` | Audit log retention in months (12–120). Defaults to `24`. The cleanup job deletes rows older than this window. |
 | `SMTP_HOST` | SMTP server for recovery emails. Defaults to `smtp.gmail.com`. |
 | `SMTP_PORT` | SMTP port. Defaults to `465`. |
 | `SMTP_SECURE` | `true` for implicit TLS. Defaults to `true`. |
@@ -196,7 +201,7 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 
 The current physical database schema is entirely in English:
 
-- Tables: `users`, `properties`, `photos`, `revoked_tokens`, and `password_reset_tokens`.
+- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, and `audit_logs`.
 - User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
@@ -204,7 +209,8 @@ The current physical database schema is entirely in English:
 - Property listing types: `Sale` and `Rent`.
 - Property statuses: `Active` and `Inactive`.
 - `revoked_tokens` and `password_reset_tokens` reference `users` with `ON DELETE CASCADE`.
-- Indexed lookups: user list ordering (`created_at`, `id`), token revocation and recovery by `user_id`, properties by `agent_id`, and photos by `property_id`.
+- Indexed lookups: user list ordering (`created_at`, `id`), token revocation and recovery by `user_id`, properties by `agent_id`, photos by `property_id`, and audit queries by actor, scope, entity and creation time.
+- `audit_logs` is append-only, has no foreign key to `users` (history survives user deletion), and stores actor snapshots plus an optional JSONB `changes` document.
 
 ## Available scripts
 
@@ -488,6 +494,52 @@ Authorization: Bearer <token>
 
 The API stores only the token's SHA-256 hash in `revoked_tokens`, together with its user ID and expiration date. Logout is idempotent: concurrent or repeated logout requests with the same token return `200` and keep a single revocation row. Other protected endpoints still reject the revoked token with `401`.
 
+### Get the audit history
+
+```text
+GET /api/v1/audit-logs
+Authorization: Bearer <token>
+```
+
+Both roles can query this endpoint:
+
+- `ADMIN` sees every audit event.
+- `PARTNER` only sees events where it is the actor; an `actorId` query parameter is ignored and replaced with the authenticated user's ID.
+
+Supported query parameters:
+
+| Parameter | Default | Rules |
+| --- | --- | --- |
+| `page` | `1` | Integer greater than or equal to 1. |
+| `pageSize` | `20` | Integer between 1 and 100. |
+| `scope` | none | `SECURITY` or `BUSINESS`. |
+| `action` | none | Exact action name, for example `LOGIN_SUCCEEDED` or `USER_UPDATED`. |
+| `actorId` | none | ADMIN only in practice; PARTNER is forced to its own ID. |
+| `entityType` | none | Entity type, for example `USER`. |
+| `entityId` | none | Entity ID. |
+| `from` | none | ISO date; inclusive lower bound. |
+| `to` | none | ISO date; inclusive upper bound. |
+
+Example response:
+
+```json
+{
+  "success": true,
+  "message": "Historial obtenido exitosamente.",
+  "data": {
+    "logs": [],
+    "pagination": {
+      "page": 1,
+      "pageSize": 20,
+      "total": 0,
+      "totalPages": 0
+    }
+  }
+}
+```
+
+The log is append-only: there is no API to update or delete audit rows. Cleanup is automatic using `AUDIT_RETENTION_MONTHS`, which defaults to 24 months.
+
 ### Recover a forgotten password
 
 ```text
@@ -664,7 +716,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, paginated user listing with search and sort, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, paginated user listing with search and sort, audit history and partner visibility, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
@@ -719,13 +771,16 @@ This project keeps every schema change in its own migration:
 prisma/migrations/20261103003201_add_user_password_changed_at/
 prisma/migrations/20261105020528_add_user_must_change_password/
 prisma/migrations/20261111000000_add_relations_and_indexes/
+prisma/migrations/20261111120000_add_audit_logs/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
 
 The second one adds `users.must_change_password`, the flag behind the mandatory password change for invited or ADMIN-reset accounts.
 
-The third one removes any orphaned token rows, adds lookup indexes for token revocation, token recovery, user listing, properties by agent and photos by property, and makes both token tables reference `users` with `ON DELETE CASCADE`. The cascade guarantees that token rows cannot survive a user deleted outside the API. Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
+The third one removes any orphaned token rows, adds lookup indexes for token revocation, token recovery, user listing, properties by agent and photos by property, and makes both token tables reference `users` with `ON DELETE CASCADE`. The cascade guarantees that token rows cannot survive a user deleted outside the API.
+
+The fourth one creates the append-only `audit_logs` table, its scope enum and its query indexes. Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
 The password recovery and invitation flows need no other migrations: they reuse the `password_reset_tokens` table created by the initial schema.
 
@@ -740,6 +795,9 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Expired revoked tokens are removed at startup and every hour.
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
 - Login attempts are rate limited per account and per IP; password changes, administrator mutations, forgot-password and reset-password have dedicated limits; a global API limit covers the remaining routes. Browser origins are restricted by `CORS_ORIGINS`, and `TRUST_PROXY` controls how client IPs are derived behind a reverse proxy. Set `RATE_LIMIT_REDIS_URL` to share the counters across multiple instances.
+- Authentication events, password changes/resets and user-management mutations are written to `audit_logs` with actor snapshots, IP, user-agent and request ID. The log is append-only, never stores passwords or tokens, and survives user deletion. Audit writes are best-effort: a failed audit insert is logged but does not roll back the business operation.
+- Audit history is retained for 24 months by default (`AUDIT_RETENTION_MONTHS`, minimum 12, maximum 120) and purged automatically by the hourly maintenance job. ADMINs see the full history; PARTNERs only see their own events.
+- HTTP requests are logged with pino using a generated `X-Request-Id`; authorization, cookies and password/token fields are redacted.
 - New passwords are limited to 72 UTF-8 bytes to prevent silent bcrypt truncation.
 - Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are shown only once in the creation response, and are stored only as bcrypt hashes.
 - The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.

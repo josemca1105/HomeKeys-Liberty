@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { prisma } from "./config/database";
 import { environment } from "./config/env";
+import { cleanupAuditLogsByRetention } from "./services/audit-retention-service";
 import {
   cleanupExpiredPasswordResetTokens,
   cleanupExpiredRevokedTokens,
@@ -29,6 +30,12 @@ const runTokenCleanup = async (): Promise<void> => {
       console.log(
         `Removed ${deletedResetTokens} expired password reset tokens.`,
       );
+    }
+
+    const deletedAuditLogs = await cleanupAuditLogsByRetention();
+
+    if (deletedAuditLogs > 0) {
+      console.log(`Removed ${deletedAuditLogs} expired audit logs.`);
     }
   } catch (error) {
     console.error("Failed to clean up expired tokens.", error);
