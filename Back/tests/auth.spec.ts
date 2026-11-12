@@ -205,6 +205,13 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
     assert.equal(logoutResponse.status, 200);
     assert.equal(database.revokedTokens.length, 1);
 
+    const repeatedLogoutResponse = await request(app)
+      .post("/api/v1/auth/logout")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(repeatedLogoutResponse.status, 200);
+    assert.equal(database.revokedTokens.length, 1);
+
     const response = await request(app)
       .post("/api/v1/users/add")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -213,6 +220,23 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
     assert.equal(response.status, 401);
     assert.equal(response.body.code, "SESSION_REVOKED");
     assert.equal(database.getUserCreateCallCount(), 0);
+  });
+
+  it("treats concurrent logout requests with the same token as idempotent", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app)
+        .post("/api/v1/auth/logout")
+        .set("Authorization", `Bearer ${adminToken}`),
+      request(app)
+        .post("/api/v1/auth/logout")
+        .set("Authorization", `Bearer ${adminToken}`),
+    ]);
+
+    assert.equal(firstResponse.status, 200);
+    assert.equal(secondResponse.status, 200);
+    assert.equal(database.revokedTokens.length, 1);
   });
 
   it("rejects passwords that exceed the bcrypt UTF-8 byte limit", async () => {

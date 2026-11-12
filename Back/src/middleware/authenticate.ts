@@ -37,63 +37,67 @@ const getBearerToken = (authorization: string | undefined): string | null => {
   return token;
 };
 
-export const authenticate: RequestHandler = async (
-  req,
-  _res,
-  next,
-): Promise<void> => {
-  try {
-    const token = getBearerToken(req.headers.authorization);
-
-    if (!token) {
-      throw createSessionError(
-        "AUTHENTICATION_REQUIRED",
-        "Debes iniciar sesión para acceder a este recurso.",
-      );
-    }
-
-    let tokenPayload: AuthTokenPayload;
-
+const createAuthenticate = (allowRevokedToken: boolean): RequestHandler => {
+  return async (req, _res, next): Promise<void> => {
     try {
-      tokenPayload = verifyAuthToken(token);
-    } catch {
-      throw createSessionError();
+      const token = getBearerToken(req.headers.authorization);
+
+      if (!token) {
+        throw createSessionError(
+          "AUTHENTICATION_REQUIRED",
+          "Debes iniciar sesión para acceder a este recurso.",
+        );
+      }
+
+      let tokenPayload: AuthTokenPayload;
+
+      try {
+        tokenPayload = verifyAuthToken(token);
+      } catch {
+        throw createSessionError();
+      }
+
+      const [revokedToken, user] = await Promise.all([
+        findRevokedTokenByHash(hashToken(token)),
+        findUserAuthorizationById(tokenPayload.userId),
+      ]);
+
+      if (revokedToken && !allowRevokedToken) {
+        throw createSessionError(
+          "SESSION_REVOKED",
+          "Esta sesión ya fue cerrada. Inicia sesión nuevamente.",
+        );
+      }
+
+      if (!user) {
+        throw createSessionError();
+      }
+
+      if (
+        user.passwordChangedAt !== null &&
+        tokenPayload.issuedAt.getTime() < user.passwordChangedAt.getTime()
+      ) {
+        throw createSessionError(
+          "SESSION_INVALIDATED",
+          "Esta sesión ya no es válida porque la contraseña cambió. Inicia sesión nuevamente.",
+        );
+      }
+
+      req.auth = {
+        ...tokenPayload,
+        role: user.role,
+        token,
+        mustChangePassword: user.mustChangePassword,
+      };
+      next();
+    } catch (error) {
+      next(error);
     }
-
-    const [revokedToken, user] = await Promise.all([
-      findRevokedTokenByHash(hashToken(token)),
-      findUserAuthorizationById(tokenPayload.userId),
-    ]);
-
-    if (revokedToken) {
-      throw createSessionError(
-        "SESSION_REVOKED",
-        "Esta sesión ya fue cerrada. Inicia sesión nuevamente.",
-      );
-    }
-
-    if (!user) {
-      throw createSessionError();
-    }
-
-    if (
-      user.passwordChangedAt !== null &&
-      tokenPayload.issuedAt.getTime() < user.passwordChangedAt.getTime()
-    ) {
-      throw createSessionError(
-        "SESSION_INVALIDATED",
-        "Esta sesión ya no es válida porque la contraseña cambió. Inicia sesión nuevamente.",
-      );
-    }
-
-    req.auth = {
-      ...tokenPayload,
-      role: user.role,
-      token,
-      mustChangePassword: user.mustChangePassword,
-    };
-    next();
-  } catch (error) {
-    next(error);
-  }
+  };
 };
+
+export const authenticate = createAuthenticate(false);
+
+// Logout is idempotent: a token already in the blocklist still identifies its
+// own session, so repeating logout can return 200 without exposing data.
+export const authenticateForLogout = createAuthenticate(true);

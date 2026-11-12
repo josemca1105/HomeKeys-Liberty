@@ -19,8 +19,11 @@ export const findRevokedTokenByHash = async (
 export const revokeToken = async (
   tokenData: RevokeTokenData,
 ): Promise<void> => {
-  await prisma.revokedToken.create({
-    data: tokenData,
+  // Concurrent logout requests race on the unique token hash. ON CONFLICT DO
+  // NOTHING keeps the operation idempotent instead of returning P2002.
+  await prisma.revokedToken.createMany({
+    data: [tokenData],
+    skipDuplicates: true,
   });
 };
 

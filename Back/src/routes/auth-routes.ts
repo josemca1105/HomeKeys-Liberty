@@ -5,7 +5,7 @@ import {
   logout,
   resetPassword,
 } from "../controllers/auth-controller";
-import { authenticate } from "../middleware/authenticate";
+import { authenticateForLogout } from "../middleware/authenticate";
 import {
   forgotPasswordEmailRateLimiter,
   forgotPasswordIpRateLimiter,
@@ -30,7 +30,7 @@ authRoutes.post(
   validateRequest(loginSchema),
   login,
 );
-authRoutes.post("/logout", authenticate, logout);
+authRoutes.post("/logout", authenticateForLogout, logout);
 
 authRoutes.post(
   "/forgot-password",

@@ -452,7 +452,7 @@ POST /api/v1/auth/logout
 Authorization: Bearer <token>
 ```
 
-The API stores only the token's SHA-256 hash in `revoked_tokens`, together with its user ID and expiration date. Reusing the token after logout returns `401`.
+The API stores only the token's SHA-256 hash in `revoked_tokens`, together with its user ID and expiration date. Logout is idempotent: concurrent or repeated logout requests with the same token return `200` and keep a single revocation row. Other protected endpoints still reject the revoked token with `401`.
 
 ### Recover a forgotten password
 
@@ -630,7 +630,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
@@ -699,7 +699,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Use a long, random `JWT_SECRET` for every real environment. The API rejects values shorter than 64 characters, low-diversity values, leading/trailing whitespace and known placeholders, so a copied `.env.example` cannot start by accident.
 - Change bootstrap passwords before deployment.
 - Password hashes and raw revoked tokens are never returned by the API.
-- Only SHA-256 token hashes are stored for logout revocation.
+- Only SHA-256 token hashes are stored for logout revocation. Logout revocation uses `ON CONFLICT DO NOTHING`, so concurrent or repeated logout requests are idempotent and cannot produce a `500` on the unique token hash.
 - Expired revoked tokens are removed at startup and every hour.
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
 - Login attempts are rate limited per account and per IP; password changes, administrator mutations, forgot-password and reset-password have dedicated limits; a global API limit covers the remaining routes. Browser origins are restricted by `CORS_ORIGINS`, and `TRUST_PROXY` controls how client IPs are derived behind a reverse proxy. Set `RATE_LIMIT_REDIS_URL` to share the counters across multiple instances.

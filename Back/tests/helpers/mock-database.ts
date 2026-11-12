@@ -68,6 +68,15 @@ interface RevokeTokenArgs {
   };
 }
 
+interface CreateManyRevokedTokensArgs {
+  data: Array<{
+    tokenHash: string;
+    userId: number;
+    expiresAt: Date;
+  }>;
+  skipDuplicates?: boolean;
+}
+
 interface DeleteRevokedTokensArgs {
   where: {
     expiresAt?: {
@@ -147,6 +156,9 @@ interface RevokedTokenDelegateMock {
     args: FindRevokedTokenArgs,
   ) => Promise<Pick<RevokedToken, "id"> | null>;
   create: (args: RevokeTokenArgs) => Promise<RevokedToken>;
+  createMany: (
+    args: CreateManyRevokedTokensArgs,
+  ) => Promise<{ count: number }>;
   deleteMany: (args: DeleteRevokedTokensArgs) => Promise<{ count: number }>;
 }
 
@@ -397,6 +409,39 @@ export const createMockDatabase = (): MockDatabase => {
     };
     revokedTokens.push(revokedToken);
     return revokedToken;
+  };
+
+  revokedTokenDelegate.createMany = async (
+    args: CreateManyRevokedTokensArgs,
+  ): Promise<{ count: number }> => {
+    let createdCount = 0;
+
+    for (const tokenData of args.data) {
+      const existingToken = revokedTokens.find(
+        (token) => token.tokenHash === tokenData.tokenHash,
+      );
+
+      if (existingToken) {
+        if (args.skipDuplicates) {
+          continue;
+        }
+
+        throw new Prisma.PrismaClientKnownRequestError("Duplicate token", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["token_hash"] },
+        });
+      }
+
+      revokedTokens.push({
+        id: revokedTokens.length + 1,
+        ...tokenData,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
+      createdCount += 1;
+    }
+
+    return { count: createdCount };
   };
 
   revokedTokenDelegate.deleteMany = async (
