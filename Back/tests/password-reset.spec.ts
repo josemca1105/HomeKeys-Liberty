@@ -15,6 +15,7 @@ import {
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
+import { flushBackgroundTasks } from "./helpers/background-tasks";
 
 const extractResetToken = (mail: OutgoingMail): string => {
   const match = /token=([0-9a-f]+)/.exec(mail.text);
@@ -22,9 +23,9 @@ const extractResetToken = (mail: OutgoingMail): string => {
   return match[1] as string;
 };
 
-// The forgot-password email limiter allows 5 requests per 15 minutes and its
-// in-memory store is shared by every test in this file, so the tests below use
-// exactly 5 forgot-password calls in total. The limiter itself is covered in
+// The forgot-password email limiter allows 5 requests per email in 15 minutes
+// and its in-memory store is shared by every test in this file. The tests below
+// stay within that per-email budget; the limiter itself is covered in
 // security.spec.ts, which runs in its own process.
 describe("Password recovery HTTP integration", { concurrency: false }, () => {
   let app: Express;
@@ -73,6 +74,8 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     const repeatedResponse = await request(app)
       .post("/api/v1/auth/forgot-password")
       .send({ email: "partner@example.com" });
+
+    await flushBackgroundTasks();
 
     assert.equal(unknownResponse.status, 200);
     assert.deepEqual(unknownResponse.body, knownResponse.body);
@@ -123,6 +126,52 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     assert.equal(storedToken.used, false);
   });
 
+  it("responds without waiting for the email delivery", async () => {
+    let releaseMail: () => void = () => {};
+    let mailStarted = false;
+    const pendingMail = new Promise<void>((resolve) => {
+      releaseMail = resolve;
+    });
+
+    setMailSenderForTesting({
+      sendMail: async (options: OutgoingMail): Promise<unknown> => {
+        mailStarted = true;
+        await pendingMail;
+        return { accepted: [options.to] };
+      },
+    });
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error("The forgot-password response waited for SMTP."));
+      }, 1000);
+    });
+
+    let response: request.Response;
+
+    try {
+      response = await Promise.race([
+        request(app)
+          .post("/api/v1/auth/forgot-password")
+          .send({ email: "admin@example.com" }),
+        timeoutPromise,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    assert.equal(response.status, 200);
+
+    await flushBackgroundTasks();
+    assert.equal(mailStarted, true);
+
+    releaseMail();
+    await flushBackgroundTasks();
+  });
+
   it("resets the password with a valid token and closes previous sessions", async () => {
     const partnerToken = await login(
       "partner@example.com",
@@ -132,6 +181,7 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     await request(app)
       .post("/api/v1/auth/forgot-password")
       .send({ email: "partner@example.com" });
+    await flushBackgroundTasks();
     const rawToken = extractResetToken(outbox[0] as OutgoingMail);
 
     const response = await request(app)
@@ -290,6 +340,8 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     const response = await request(app)
       .post("/api/v1/auth/forgot-password")
       .send({ email: "partner@example.com" });
+
+    await flushBackgroundTasks();
 
     assert.equal(response.status, 200);
     assert.equal(

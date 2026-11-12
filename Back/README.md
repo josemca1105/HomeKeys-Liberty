@@ -470,6 +470,8 @@ Public endpoint. Body:
 
 When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}?token=<token>`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email.
 
+Token issuance and SMTP delivery run in the background after the generic response is sent. This keeps the response time approximately the same whether the email exists or not, closing the timing side channel that would otherwise reveal registered accounts. Delivery failures are logged server-side and do not change the response. A durable email queue is a future improvement for guaranteed delivery across process restarts.
+
 The response is always the same generic message, whether the email exists or not, so the endpoint cannot be used to discover registered accounts:
 
 ```json
@@ -628,7 +630,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
@@ -708,12 +710,12 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction.
-- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
+- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and SMTP delivery run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
 - User accounts never expose a password anywhere: initial passwords are generated internally, invitation and notice emails carry only links, and explicit ADMIN passwords travel through their own channel. Invitation tokens are single-use and valid for 24 hours.
 - Accounts created or reset by an ADMIN must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`), and administrator password resets notify the affected user by email without including the new password.
 - Profile photo URLs only accept `http` or `https`, reject embedded credentials, and reject literal localhost, private, link-local and internal hosts. This prevents stored XSS through `javascript:`/`data:` URLs and basic SSRF attempts against local or cloud-metadata addresses. If the backend later downloads images, it must also resolve DNS and enforce an allowlist or an SSRF-safe fetcher.
 - A successful password reset closes every session issued before the reset through `users.password_changed_at`; the user signs in again with the new password.
 - Recovery emails never include passwords, only the one-time link. SMTP secrets live exclusively in the ignored `.env` file and must never be committed; rotate the Gmail app password if it is ever exposed.
-- Failed SMTP delivery is logged server-side and never changes the generic HTTP response.
+- Failed SMTP delivery is logged server-side in the background and never changes the generic HTTP response.
 - Expired revoked tokens and expired password reset tokens are removed at startup and every hour.
 - The `deepmerge-ts` npm override patches a transitive Prisma CLI vulnerability while preserving Prisma 6 compatibility. Re-run Prisma validation and `npm audit` before changing it.

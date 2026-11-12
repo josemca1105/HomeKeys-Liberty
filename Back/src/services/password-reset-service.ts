@@ -79,6 +79,35 @@ export const issuePasswordResetToken = async (
   return rawToken;
 };
 
+interface PasswordResetRecipient {
+  id: number;
+  email: string;
+  firstName: string;
+}
+
+const deliverPasswordResetEmail = async (
+  user: PasswordResetRecipient,
+): Promise<void> => {
+  try {
+    const rawToken = await issuePasswordResetToken(
+      user.id,
+      PASSWORD_RESET_TOKEN_TTL_MINUTES,
+    );
+    const resetUrl = `${environment.PASSWORD_RESET_BASE_URL}?token=${rawToken}`;
+
+    await sendPasswordResetEmail({
+      to: user.email,
+      firstName: user.firstName,
+      resetUrl,
+      expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
+    });
+  } catch (error) {
+    // Logging only: the HTTP response is intentionally identical whether the
+    // email exists, the token cannot be issued or SMTP fails.
+    console.error("Failed to process the password reset email.", error);
+  }
+};
+
 export const requestPasswordReset = async (email: string): Promise<void> => {
   const user = await findUserByEmail(email);
 
@@ -88,24 +117,15 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     return;
   }
 
-  const rawToken = await issuePasswordResetToken(
-    user.id,
-    PASSWORD_RESET_TOKEN_TTL_MINUTES,
-  );
-  const resetUrl = `${environment.PASSWORD_RESET_BASE_URL}?token=${rawToken}`;
-
-  try {
-    await sendPasswordResetEmail({
-      to: user.email,
+  // Token issuance and SMTP delivery run after the response so both branches
+  // take approximately the same time and the request does not wait for SMTP.
+  setImmediate(() => {
+    void deliverPasswordResetEmail({
+      id: user.id,
+      email: user.email,
       firstName: user.firstName,
-      resetUrl,
-      expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
     });
-  } catch (error) {
-    // Logging only: answering differently here would reveal whether the
-    // email exists.
-    console.error("Failed to send the password reset email.", error);
-  }
+  });
 };
 
 export const resetUserPassword = async (

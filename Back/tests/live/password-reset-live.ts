@@ -55,6 +55,21 @@ const extractResetToken = (mail: OutgoingMail): string => {
   return match[1] as string;
 };
 
+const waitForOutbox = async (
+  expectedCount: number,
+  timeoutMs = 15000,
+): Promise<void> => {
+  const startedAt = Date.now();
+
+  while (outbox.length < expectedCount) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for the password reset email.");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+};
+
 const cleanup = async (): Promise<void> => {
   if (createdUserIds.length > 0) {
     await prisma.revokedToken.deleteMany({
@@ -95,6 +110,8 @@ const run = async (): Promise<void> => {
   assert.equal(unknownResponse.status, 200);
   assert.equal(knownResponse.status, 200);
   assert.deepEqual(unknownResponse.body, knownResponse.body);
+
+  await waitForOutbox(1);
   assert.equal(outbox.length, 1, "Only the registered email receives mail");
 
   // 2. The real email was delivered through Gmail SMTP.
@@ -180,6 +197,8 @@ const run = async (): Promise<void> => {
     .post("/api/v1/auth/forgot-password")
     .send({ email: userEmail });
   assert.equal(expiredTokenResponse.status, 200);
+
+  await waitForOutbox(2);
   assert.equal(outbox.length, 2);
   const expiredRawToken = extractResetToken(outbox[1] as OutgoingMail);
 

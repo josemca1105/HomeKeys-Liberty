@@ -13,6 +13,7 @@ import {
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
+import { flushBackgroundTasks } from "./helpers/background-tasks";
 
 describe("Invitation and forced password change HTTP integration", { concurrency: false }, () => {
   let app: Express;
@@ -318,6 +319,7 @@ describe("Invitation and forced password change HTTP integration", { concurrency
       .send({ email: "partner@example.com" });
 
     assert.equal(forgotResponse.status, 200);
+    await flushBackgroundTasks();
 
     const resetMail = outbox[outbox.length - 1];
     assert.ok(resetMail);
