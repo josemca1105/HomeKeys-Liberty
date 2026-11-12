@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { jwtSecretSchema } from "./jwt-secret";
 
 dotenv.config();
 
@@ -51,9 +52,7 @@ const hasOnlyValidCorsOrigins = (origins: string[]): boolean => {
 
 const environmentSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required."),
-  JWT_SECRET: z
-    .string()
-    .min(32, "JWT_SECRET must contain at least 32 characters."),
+  JWT_SECRET: jwtSecretSchema,
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   CORS_ORIGINS: z
     .string()

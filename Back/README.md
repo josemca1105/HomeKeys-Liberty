@@ -107,7 +107,7 @@ Configure these variables in `.env`:
 | Variable | Description |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string. |
-| `JWT_SECRET` | Random secret with at least 32 characters. |
+| `JWT_SECRET` | Random secret with at least 64 characters and high entropy. Generate it with a cryptographic random source; do not write a phrase or reuse an example. |
 | `PORT` | HTTP port; normally `3000`. |
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
 | `TRUST_PROXY` | Express `trust proxy` setting. Use `false` without a proxy, `1` behind one reverse proxy, or a comma-separated list of trusted proxy IPs/subnets. Defaults to `false`. |
@@ -126,6 +126,20 @@ Connection string format:
 ```text
 postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public
 ```
+
+Generate `JWT_SECRET` with a cryptographic random source:
+
+```powershell
+openssl rand -hex 32
+```
+
+Or, if OpenSSL is not available:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+The API requires at least 64 characters, at least 16 distinct characters, and rejects placeholders such as `REPLACE_WITH...` or `CHANGE_ME...`. The value in `.env.example` is intentionally invalid, so the API will not start until you replace it.
 
 Never commit the real `.env` file. It is excluded by `Back/.gitignore`; only `.env.example` should be committed.
 
@@ -677,7 +691,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 
 - Never commit `.env`, `prisma/seed.ts`, personal data, or real credentials.
 - Keep private administrator data only in the ignored local seed; commit only `prisma/seed.example.ts`.
-- Use a long, random `JWT_SECRET` for every real environment.
+- Use a long, random `JWT_SECRET` for every real environment. The API rejects values shorter than 64 characters, low-diversity values, leading/trailing whitespace and known placeholders, so a copied `.env.example` cannot start by accident.
 - Change bootstrap passwords before deployment.
 - Password hashes and raw revoked tokens are never returned by the API.
 - Only SHA-256 token hashes are stored for logout revocation.
