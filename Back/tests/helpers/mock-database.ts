@@ -2,6 +2,9 @@ import { Prisma, Role } from "@prisma/client";
 import type { PasswordResetToken, RevokedToken, User } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { prisma } from "../../src/config/database";
+
+// The automated suite must never reach the real SMTP transport.
+process.env.NODE_ENV = "test";
 import type {
   CreateUserData,
   UpdateUserData,

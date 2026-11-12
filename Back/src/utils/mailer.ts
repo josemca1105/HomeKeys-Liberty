@@ -51,6 +51,12 @@ const createSmtpMailSender = (): MailSender => {
 
 const getMailSender = (): MailSender => {
   if (!mailSender) {
+    if (process.env.NODE_ENV === "test") {
+      throw new Error(
+        "Real SMTP delivery is disabled in tests. Use setMailSenderForTesting().",
+      );
+    }
+
     mailSender = createSmtpMailSender();
   }
 
