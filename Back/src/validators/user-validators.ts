@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ListUsersQuery } from "../types/user";
 import {
   createPasswordSchema,
   strictObjectError,
@@ -10,6 +11,12 @@ const roleSchema = z.enum(["ADMIN", "PARTNER"], {
   error: "El rol debe ser ADMIN o PARTNER.",
 });
 
+const strictQueryError = (issue: { code: string }): string => {
+  return issue.code === "unrecognized_keys"
+    ? "No se permiten parámetros desconocidos en la consulta."
+    : "La consulta de la petición no es válida.";
+};
+
 export const userIdParamsSchema = z.object(
   {
     id: z.coerce
@@ -19,6 +26,43 @@ export const userIdParamsSchema = z.object(
       .max(2147483647, "El ID del usuario debe ser un número entero positivo."),
   },
   { error: "El ID del usuario debe ser un número entero positivo." },
+);
+
+export const listUsersQuerySchema: z.ZodType<ListUsersQuery> = z.strictObject(
+  {
+    page: z.coerce
+      .number({ error: "La página debe ser un número entero mayor o igual a 1." })
+      .int("La página debe ser un número entero mayor o igual a 1.")
+      .min(1, "La página debe ser un número entero mayor o igual a 1.")
+      .default(1),
+    pageSize: z.coerce
+      .number({
+        error:
+          "El tamaño de página debe ser un número entero entre 1 y 100.",
+      })
+      .int("El tamaño de página debe ser un número entero entre 1 y 100.")
+      .min(1, "El tamaño de página debe ser un número entero entre 1 y 100.")
+      .max(100, "El tamaño de página debe ser un número entero entre 1 y 100.")
+      .default(20),
+    search: z
+      .string({ error: "La búsqueda debe ser un texto." })
+      .trim()
+      .min(1, "La búsqueda no puede estar vacía.")
+      .max(100, "La búsqueda no puede tener más de 100 caracteres.")
+      .optional(),
+    role: roleSchema.optional(),
+    sortBy: z
+      .enum(["createdAt", "firstName", "lastName", "email", "role"], {
+        error: "El campo de ordenamiento no es válido.",
+      })
+      .default("createdAt"),
+    sortOrder: z
+      .enum(["asc", "desc"], {
+        error: "El orden debe ser asc o desc.",
+      })
+      .default("desc"),
+  },
+  { error: strictQueryError },
 );
 
 export const createUserSchema = z.object(

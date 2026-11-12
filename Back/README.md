@@ -252,11 +252,43 @@ GET /api/v1/users
 Authorization: Bearer <token>
 ```
 
-Only ADMIN users can access this endpoint. The response contains `data.users`, ordered by `createdAt` from newest to oldest. Password hashes and token data are never included.
+Only ADMIN users can access this endpoint. The response contains `data.users` ordered by `createdAt` from newest to oldest by default, plus `data.pagination`. Password hashes and token data are never included.
+
+Supported query parameters:
+
+| Parameter | Default | Rules |
+| --- | --- | --- |
+| `page` | `1` | Integer greater than or equal to 1. |
+| `pageSize` | `20` | Integer between 1 and 100. |
+| `search` | none | Up to 100 characters; case-insensitive match on first name, last name, email or phone. |
+| `role` | none | `ADMIN` or `PARTNER`. |
+| `sortBy` | `createdAt` | `createdAt`, `firstName`, `lastName`, `email` or `role`. |
+| `sortOrder` | `desc` | `asc` or `desc`. |
+
+Unknown query parameters are rejected with `400 VALIDATION_ERROR`.
+
+Example response:
+
+```json
+{
+  "success": true,
+  "message": "Usuarios obtenidos exitosamente.",
+  "data": {
+    "users": [],
+    "pagination": {
+      "page": 1,
+      "pageSize": 20,
+      "total": 0,
+      "totalPages": 0
+    }
+  }
+}
+```
 
 Possible responses:
 
 - `200`: user list returned successfully.
+- `400 VALIDATION_ERROR`: invalid page, pageSize, sort, role or unknown query parameter.
 - `401`: missing, invalid, expired, or revoked token.
 - `403`: authenticated user is not an administrator.
 
@@ -632,7 +664,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, paginated user listing with search and sort, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 

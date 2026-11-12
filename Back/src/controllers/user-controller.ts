@@ -9,6 +9,7 @@ import {
 import type {
   ChangePasswordInput,
   CreateUserInput,
+  ListUsersQuery,
   UpdateUserInput,
 } from "../types/user";
 import { AppError } from "../utils/app-error";
@@ -45,13 +46,14 @@ export const getCurrentUser = asyncHandler(async (req, res): Promise<void> => {
   });
 });
 
-export const getUsers = asyncHandler(async (_req, res): Promise<void> => {
-  const users = await listUsers();
+export const getUsers = asyncHandler(async (req, res): Promise<void> => {
+  const query = req.validatedQuery as ListUsersQuery;
+  const { users, pagination } = await listUsers(query);
 
   res.status(200).json({
     success: true,
     message: "Usuarios obtenidos exitosamente.",
-    data: { users },
+    data: { users, pagination },
   });
 });
 

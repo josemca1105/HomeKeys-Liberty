@@ -42,10 +42,18 @@ interface DeleteUserArgs {
   };
 }
 
+interface UserWhereMock {
+  role?: Role;
+  OR?: Array<{
+    firstName?: { contains: string; mode?: string };
+    lastName?: { contains: string; mode?: string };
+    email?: { contains: string; mode?: string };
+    phone?: { contains: string; mode?: string };
+  }>;
+}
+
 interface CountUsersArgs {
-  where: {
-    role?: Role;
-  };
+  where?: UserWhereMock;
 }
 
 interface CountPropertiesArgs {
@@ -135,7 +143,10 @@ interface DeletePasswordResetTokensArgs {
 
 interface FindManyUsersArgs {
   select?: Record<string, boolean>;
+  where?: UserWhereMock;
   orderBy?: Array<Record<string, string>>;
+  skip?: number;
+  take?: number;
 }
 
 interface UserDelegateMock {
@@ -299,14 +310,109 @@ export const createMockDatabase = (): MockDatabase => {
     return findUserRecord(args);
   };
 
-  userDelegate.findMany = async (_args: FindManyUsersArgs): Promise<User[]> => {
+  const matchesUserWhere = (
+    user: User,
+    where: UserWhereMock | undefined,
+  ): boolean => {
+    if (where === undefined) {
+      return true;
+    }
+
+    if (where.role !== undefined && user.role !== where.role) {
+      return false;
+    }
+
+    if (where.OR !== undefined) {
+      const matchesAny = where.OR.some((condition) => {
+        for (const [field, filter] of Object.entries(condition)) {
+          if (
+            filter === undefined ||
+            typeof filter !== "object" ||
+            filter === null ||
+            !("contains" in filter)
+          ) {
+            continue;
+          }
+
+          const value = user[field as keyof User];
+
+          if (
+            typeof value === "string" &&
+            value.toLowerCase().includes(filter.contains.toLowerCase())
+          ) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (!matchesAny) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const compareUserValues = (first: unknown, second: unknown): number => {
+    if (first instanceof Date && second instanceof Date) {
+      return first.getTime() - second.getTime();
+    }
+
+    if (typeof first === "number" && typeof second === "number") {
+      return first - second;
+    }
+
+    return String(first).localeCompare(String(second));
+  };
+
+  const sortUsers = (
+    candidates: User[],
+    orderBy: Array<Record<string, string>>,
+  ): User[] => {
+    return [...candidates].sort((first, second) => {
+      for (const order of orderBy) {
+        const entry = Object.entries(order)[0];
+
+        if (entry === undefined) {
+          continue;
+        }
+
+        const [field, direction] = entry;
+        const comparison = compareUserValues(
+          first[field as keyof User],
+          second[field as keyof User],
+        );
+
+        if (comparison !== 0) {
+          return direction === "desc" ? -comparison : comparison;
+        }
+      }
+
+      return 0;
+    });
+  };
+
+  userDelegate.findMany = async (args: FindManyUsersArgs): Promise<User[]> => {
     userFindManyCallCount += 1;
 
     if (shouldReturnEmptyUserList) {
       return [];
     }
 
-    return users.map((user) => ({ ...user }));
+    const matchingUsers = users.filter((user) =>
+      matchesUserWhere(user, args.where),
+    );
+    const orderedUsers = args.orderBy
+      ? sortUsers(matchingUsers, args.orderBy)
+      : matchingUsers;
+    const skip = args.skip ?? 0;
+    const take = args.take ?? orderedUsers.length;
+
+    return orderedUsers
+      .slice(skip, skip + take)
+      .map((user) => ({ ...user }));
   };
 
   userDelegate.create = async (args: CreateUserArgs): Promise<User> => {
@@ -379,9 +485,11 @@ export const createMockDatabase = (): MockDatabase => {
   };
 
   userDelegate.count = async (args: CountUsersArgs): Promise<number> => {
-    return users.filter(
-      (user) => args.where.role === undefined || user.role === args.where.role,
-    ).length;
+    if (shouldReturnEmptyUserList) {
+      return 0;
+    }
+
+    return users.filter((user) => matchesUserWhere(user, args.where)).length;
   };
 
   propertyDelegate.count = async (

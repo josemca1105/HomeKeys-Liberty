@@ -86,14 +86,32 @@ export const findUserCredentialsById = async (
   });
 };
 
-export const findAllUsers = async (): Promise<UserResponseRecord[]> => {
+export interface FindUsersPageOptions {
+  where?: Prisma.UserWhereInput;
+  orderBy?: Prisma.UserOrderByWithRelationInput[];
+  skip?: number;
+  take?: number;
+}
+
+export const findUsersPage = async ({
+  where,
+  orderBy,
+  skip,
+  take,
+}: FindUsersPageOptions = {}): Promise<UserResponseRecord[]> => {
   return prisma.user.findMany({
     select: userResponseSelect,
-    orderBy: [
-      { createdAt: "desc" },
-      { id: "desc" },
-    ],
+    where,
+    orderBy,
+    skip,
+    take,
   });
+};
+
+export const countUsers = async (
+  where?: Prisma.UserWhereInput,
+): Promise<number> => {
+  return prisma.user.count({ where });
 };
 
 export const findUserById = async (

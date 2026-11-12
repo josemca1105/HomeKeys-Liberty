@@ -2,13 +2,14 @@ import { Prisma, Role } from "@prisma/client";
 import { environment } from "../config/env";
 import {
   countPropertiesByAgentId,
+  countUsers,
   countUsersByRole,
   createUserRecord,
   deleteUserWithRelatedTokens,
-  findAllUsers,
   findUserByEmail,
   findUserById,
   findUserCredentialsById,
+  findUsersPage,
   updateUserAndInvalidateResetTokens,
   updateUserRecord,
   type UpdateUserData,
@@ -21,6 +22,8 @@ import {
 import type {
   ChangePasswordInput,
   CreateUserInput,
+  ListUsersQuery,
+  PaginatedUsersResult,
   RegisterUserResult,
   UpdateUserInput,
   UserResponse,
@@ -95,9 +98,64 @@ const passwordChangeTimestamp = (): Date => {
   return new Date();
 };
 
-export const listUsers = async (): Promise<UserResponse[]> => {
-  const users = await findAllUsers();
-  return users.map(toUserResponse);
+const buildUserWhere = (query: ListUsersQuery): Prisma.UserWhereInput => {
+  const where: Prisma.UserWhereInput = {};
+
+  if (query.role !== undefined) {
+    where.role = query.role;
+  }
+
+  if (query.search !== undefined) {
+    where.OR = [
+      { firstName: { contains: query.search, mode: "insensitive" } },
+      { lastName: { contains: query.search, mode: "insensitive" } },
+      { email: { contains: query.search, mode: "insensitive" } },
+      { phone: { contains: query.search } },
+    ];
+  }
+
+  return where;
+};
+
+const buildUserOrderBy = (
+  query: ListUsersQuery,
+): Prisma.UserOrderByWithRelationInput[] => {
+  const primaryOrderBy = {
+    [query.sortBy]: query.sortOrder,
+  } as Prisma.UserOrderByWithRelationInput;
+
+  const tieBreaker: Prisma.UserOrderByWithRelationInput =
+    query.sortBy === "createdAt"
+      ? { id: query.sortOrder }
+      : { id: "desc" };
+
+  return [primaryOrderBy, tieBreaker];
+};
+
+export const listUsers = async (
+  query: ListUsersQuery,
+): Promise<PaginatedUsersResult> => {
+  const where = buildUserWhere(query);
+  const skip = (query.page - 1) * query.pageSize;
+  const [users, total] = await Promise.all([
+    findUsersPage({
+      where,
+      orderBy: buildUserOrderBy(query),
+      skip,
+      take: query.pageSize,
+    }),
+    countUsers(where),
+  ]);
+
+  return {
+    users: users.map(toUserResponse),
+    pagination: {
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / query.pageSize),
+    },
+  };
 };
 
 export const getUserProfile = async (

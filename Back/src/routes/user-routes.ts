@@ -16,10 +16,12 @@ import {
   userManagementRateLimiter,
 } from "../middleware/rate-limiters";
 import { validateParams } from "../middleware/validate-params";
+import { validateQuery } from "../middleware/validate-query";
 import { validateRequest } from "../middleware/validate-request";
 import {
   changePasswordSchema,
   createUserSchema,
+  listUsersQuerySchema,
   updateUserSchema,
   userIdParamsSchema,
 } from "../validators/user-validators";
@@ -36,7 +38,14 @@ userRoutes.post(
   addUser,
 );
 
-userRoutes.get("/", authenticate, enforcePasswordChange, isAdmin, getUsers);
+userRoutes.get(
+  "/",
+  authenticate,
+  enforcePasswordChange,
+  isAdmin,
+  validateQuery(listUsersQuerySchema),
+  getUsers,
+);
 userRoutes.get("/me", authenticate, getCurrentUser);
 
 userRoutes.patch(

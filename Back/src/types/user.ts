@@ -52,3 +52,33 @@ export interface UserResponse {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type UserSortField =
+  | "createdAt"
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "role";
+
+export type SortOrder = "asc" | "desc";
+
+export interface ListUsersQuery {
+  page: number;
+  pageSize: number;
+  search?: string;
+  role?: Role;
+  sortBy: UserSortField;
+  sortOrder: SortOrder;
+}
+
+export interface UserPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface PaginatedUsersResult {
+  users: UserResponse[];
+  pagination: UserPagination;
+}
