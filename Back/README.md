@@ -111,6 +111,8 @@ Configure these variables in `.env`:
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string. |
 | `JWT_SECRET` | Random secret with at least 64 characters and high entropy. Generate it with a cryptographic random source; do not write a phrase or reuse an example. |
+| `JWT_ISSUER` | `iss` claim stamped on issued tokens and enforced on verification. Defaults to `homekeys-liberty-api`. Change it per environment if tokens must not be shared across environments. |
+| `JWT_AUDIENCE` | `aud` claim stamped on issued tokens and enforced on verification. Defaults to `homekeys-liberty-web`; use the frontend origin if tokens should be bound to one client. |
 | `PORT` | HTTP port; normally `3000`. |
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API. Defaults to `http://localhost:5173`. |
 | `TRUST_PROXY` | Express `trust proxy` setting. Use `false` without a proxy, `1` behind one reverse proxy, or a comma-separated list of trusted proxy IPs/subnets. Defaults to `false`. |

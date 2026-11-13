@@ -53,6 +53,14 @@ const hasOnlyValidCorsOrigins = (origins: string[]): boolean => {
 const environmentSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required."),
   JWT_SECRET: jwtSecretSchema,
+  JWT_ISSUER: z
+    .string()
+    .min(1, "JWT_ISSUER is required.")
+    .default("homekeys-liberty-api"),
+  JWT_AUDIENCE: z
+    .string()
+    .min(1, "JWT_AUDIENCE is required.")
+    .default("homekeys-liberty-web"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   CORS_ORIGINS: z
     .string()
