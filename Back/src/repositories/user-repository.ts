@@ -45,7 +45,13 @@ export interface UpdateUserData {
 
 export type UserCredentialsRecord = Pick<
   User,
-  "id" | "role" | "passwordHash" | "passwordChangedAt"
+  | "id"
+  | "role"
+  | "passwordHash"
+  | "passwordChangedAt"
+  | "firstName"
+  | "lastName"
+  | "email"
 >;
 
 export const findUserByEmail = async (
@@ -82,6 +88,9 @@ export const findUserCredentialsById = async (
       role: true,
       passwordHash: true,
       passwordChangedAt: true,
+      firstName: true,
+      lastName: true,
+      email: true,
     },
   });
 };

@@ -6,10 +6,11 @@ import {
   deletePendingPasswordResetTokensByUserId,
   findPasswordResetTokenByHash,
 } from "../repositories/password-reset-token-repository";
-import { findUserByEmail } from "../repositories/user-repository";
+import { findUserByEmail, findUserById } from "../repositories/user-repository";
 import { AppError } from "../utils/app-error";
 import { sendPasswordResetEmail } from "../utils/mailer";
 import { hashPassword } from "../utils/password";
+import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
 import { hashToken } from "../utils/token";
 
 export const PASSWORD_RESET_TOKEN_TTL_MINUTES = 15;
@@ -147,6 +148,22 @@ export const resetUserPassword = async (
   if (tokenRecord.expiresAt.getTime() <= Date.now()) {
     throw resetTokenExpiredError();
   }
+
+  const user = await findUserById(tokenRecord.userId);
+
+  if (!user) {
+    throw invalidResetTokenError();
+  }
+
+  assertPasswordNotBasedOnIdentity(
+    newPassword,
+    {
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    },
+    "newPassword",
+  );
 
   const passwordHash = await hashPassword(newPassword);
   const passwordChangedAt = new Date();

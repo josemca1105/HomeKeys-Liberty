@@ -1,15 +1,22 @@
 import { z } from "zod";
+import { isCommonPassword } from "../utils/password-blocklist";
 import { createRequiredStringSchema } from "./string-schema";
 
-// Shared password policy: at least 8 characters, at most 72 UTF-8 bytes
-// (bcrypt limit), and at least one uppercase letter, one lowercase letter,
-// one number and one special character (Unicode-aware).
+export const PASSWORD_MIN_LENGTH = 12;
+
+// Shared password policy: at least 12 characters, at most 72 UTF-8 bytes
+// (bcrypt limit), at least one uppercase letter, one lowercase letter, one
+// number and one special character (Unicode-aware), and no known common or
+// predictable password.
 export const createPasswordSchema = (
   requiredMessage: string,
   invalidTypeMessage: string,
 ): z.ZodString => {
   return createRequiredStringSchema(requiredMessage, invalidTypeMessage)
-    .min(8, "La contraseña debe tener al menos 8 caracteres.")
+    .min(
+      PASSWORD_MIN_LENGTH,
+      `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
+    )
     .max(72, "La contraseña no puede tener más de 72 caracteres.")
     .refine((password) => Buffer.byteLength(password, "utf8") <= 72, {
       message: "La contraseña no puede superar los 72 bytes en formato UTF-8.",
@@ -25,6 +32,10 @@ export const createPasswordSchema = (
     })
     .refine((password) => /[\p{P}\p{S}]/u.test(password), {
       message: "La contraseña debe incluir al menos un carácter especial.",
+    })
+    .refine((password) => !isCommonPassword(password), {
+      message:
+        "La contraseña es demasiado común o predecible. Elige una diferente.",
     });
 };
 

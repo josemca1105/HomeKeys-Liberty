@@ -13,31 +13,37 @@ import {
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
+import { flushBackgroundTasks } from "./helpers/background-tasks";
 
 const INVALID_PASSWORD_CASES = [
   {
-    password: "abcdefgh1!",
+    password: "abcdefghij1!",
     message: "La contraseña debe incluir al menos una letra mayúscula.",
   },
   {
-    password: "ABCDEFGH1!",
+    password: "ABCDEFGHIJ1!",
     message: "La contraseña debe incluir al menos una letra minúscula.",
   },
   {
-    password: "ABCDEFGHa!",
+    password: "ABCDEFGHIJa!",
     message: "La contraseña debe incluir al menos un número.",
   },
   {
-    password: "ABCDEFGH1a",
+    password: "ABCDEFGHIJ1a",
     message: "La contraseña debe incluir al menos un carácter especial.",
   },
   {
     password: "Ab1!",
-    message: "La contraseña debe tener al menos 8 caracteres.",
+    message: "La contraseña debe tener al menos 12 caracteres.",
   },
   {
     password: "ñ".repeat(37),
     message: "La contraseña no puede superar los 72 bytes en formato UTF-8.",
+  },
+  {
+    password: "Password1234!",
+    message:
+      "La contraseña es demasiado común o predecible. Elige una diferente.",
   },
 ];
 
@@ -313,17 +319,18 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
       TEST_PARTNER_PASSWORD,
     );
 
+    const accentPassword = "Ñandú#2026xy";
     const accentResponse = await request(app)
       .patch("/api/v1/users/me/password")
       .set("Authorization", `Bearer ${partnerToken}`)
       .send({
         currentPassword: TEST_PARTNER_PASSWORD,
-        newPassword: "Ñandú#2026x",
+        newPassword: accentPassword,
       });
 
     assert.equal(accentResponse.status, 200);
 
-    const accentToken = await login("partner@example.com", "Ñandú#2026x");
+    const accentToken = await login("partner@example.com", accentPassword);
     assert.equal(typeof accentToken, "string");
 
     const longPassword = `Abcdef1!${"x".repeat(20)}`;
@@ -331,7 +338,7 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
       .patch("/api/v1/users/me/password")
       .set("Authorization", `Bearer ${accentToken}`)
       .send({
-        currentPassword: "Ñandú#2026x",
+        currentPassword: accentPassword,
         newPassword: longPassword,
       });
 
@@ -358,5 +365,90 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
 
     assert.equal(sessionResponse.status, 200);
     assert.equal(sessionResponse.body.data.user.id, 3);
+  });
+
+  it("rejects passwords based on the email or the name on user creation", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const response = await request(app)
+      .post("/api/v1/users/add")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        firstName: "Maria",
+        lastName: "Gonzalez",
+        email: "maria.gonzalez@example.com",
+        phone: "00000000",
+        photoUrl: null,
+        password: "MariaGonzalez2026!",
+      });
+
+    assertPasswordValidationError(
+      response,
+      "password",
+      "La contraseña no puede basarse en tu correo o en tu nombre.",
+    );
+  });
+
+  it("rejects an identity-based password in the own-password flow", async () => {
+    const partnerToken = await login(
+      "partner@example.com",
+      TEST_PARTNER_PASSWORD,
+    );
+
+    const response = await request(app)
+      .patch("/api/v1/users/me/password")
+      .set("Authorization", `Bearer ${partnerToken}`)
+      .send({
+        currentPassword: TEST_PARTNER_PASSWORD,
+        newPassword: "Partner20262026!",
+      });
+
+    assertPasswordValidationError(
+      response,
+      "newPassword",
+      "La contraseña no puede basarse en tu correo o en tu nombre.",
+    );
+  });
+
+  it("rejects an identity-based password in the admin reset flow", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ password: "Partner20262026!" });
+
+    assertPasswordValidationError(
+      response,
+      "password",
+      "La contraseña no puede basarse en tu correo o en tu nombre.",
+    );
+  });
+
+  it("rejects an identity-based password in the recovery flow", async () => {
+    const forgotResponse = await request(app)
+      .post("/api/v1/auth/forgot-password")
+      .send({ email: "partner@example.com" });
+
+    assert.equal(forgotResponse.status, 200);
+    await flushBackgroundTasks();
+
+    const mail = outbox[outbox.length - 1];
+    assert.ok(mail);
+    const tokenMatch = /#token=([0-9a-f]{64})/.exec(mail.text);
+    assert.ok(tokenMatch);
+
+    const response = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({
+        token: tokenMatch[1] as string,
+        newPassword: "Partner20262026!",
+      });
+
+    assertPasswordValidationError(
+      response,
+      "newPassword",
+      "La contraseña no puede basarse en tu correo o en tu nombre.",
+    );
   });
 });

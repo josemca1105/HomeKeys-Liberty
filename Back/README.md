@@ -34,7 +34,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - ADMIN user editing and deletion with last-admin, self-deletion, and property-relation protections.
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
 - Automatic email invitations for administrator-created users, with a single-use activation link.
-- Password policy with four character classes on every password defined through the API.
+- Password policy with a 12-character minimum, four character classes and a common-password blocklist on every password defined through the API.
 - Mandatory password change for accounts created or reset by an ADMIN.
 - Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
 - Per-IP, per-account and global rate limiting, with an optional Redis store for multiple instances.
@@ -621,9 +621,11 @@ Frontend contract: read `mustChangePassword` from the login response or `GET /us
 
 Every password defined through the API must satisfy this policy:
 
-- At least 8 characters. There is no artificial upper cap; the technical limit is 72 UTF-8 bytes (bcrypt).
+- At least 12 characters. There is no artificial upper cap; the technical limit is 72 UTF-8 bytes (bcrypt).
 - At least one uppercase letter, one lowercase letter, one number, and one special character (any punctuation mark or symbol).
 - Character classes are Unicode-aware: `ñ` and accented letters count as letters, not as special characters.
+- It cannot be a common or predictable password: a local blocklist rejects well-known passwords, product-related terms (`homekeys`, `liberty`) and common base words padded only with digits (for example `Password2026!`). Case, accents and separators are ignored when matching.
+- It cannot be based on the account email or name: the email, its local part, the first name, the last name or the full name, optionally followed only by digits (for example `MariaGonzalez2026!`).
 - The new password cannot be equal to the current one on `PATCH /api/v1/users/me/password`.
 
 The policy applies wherever a password is defined: the optional `password` of `POST /users/add`, the `newPassword` of `PATCH /users/me/password`, the `newPassword` of `POST /auth/reset-password`, and the administrator `password` reset of `PATCH /users/:id`. Violations return `400 VALIDATION_ERROR` with a field-level message.

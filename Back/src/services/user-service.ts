@@ -41,6 +41,7 @@ import {
   generateTemporaryPassword,
   hashPassword,
 } from "../utils/password";
+import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
 import { toUserResponse } from "../utils/user-response";
 
 const duplicateEmailError = (): AppError => {
@@ -205,6 +206,19 @@ export const registerUser = async (
   // The initial password is never disclosed: the account is activated through
   // the invitation link sent to the new user's email.
   const initialPassword = input.password ?? generateTemporaryPassword();
+
+  if (input.password !== undefined) {
+    assertPasswordNotBasedOnIdentity(
+      input.password,
+      {
+        email: input.email,
+        firstName: input.firstName,
+        lastName: input.lastName,
+      },
+      "password",
+    );
+  }
+
   const passwordHash = await hashPassword(initialPassword);
 
   let user;
@@ -256,6 +270,16 @@ export const changeOwnPassword = async (
     throw invalidCurrentPasswordError();
   }
 
+  assertPasswordNotBasedOnIdentity(
+    input.newPassword,
+    {
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    },
+    "newPassword",
+  );
+
   const updatedUser = await updateUserAndInvalidateResetTokens(userId, {
     passwordHash: await hashPassword(input.newPassword),
     passwordChangedAt: passwordChangeTimestamp(),
@@ -289,6 +313,18 @@ export const updateUserByAdmin = async (
     if (existingUser) {
       throw duplicateEmailError();
     }
+  }
+
+  if (input.password !== undefined) {
+    assertPasswordNotBasedOnIdentity(
+      input.password,
+      {
+        email: input.email ?? currentTarget.email,
+        firstName: input.firstName ?? currentTarget.firstName,
+        lastName: input.lastName ?? currentTarget.lastName,
+      },
+      "password",
+    );
   }
 
   const isChangingPassword = input.password !== undefined;
