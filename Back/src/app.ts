@@ -7,6 +7,7 @@ import { createLogger } from "./config/logger";
 import { AppError } from "./utils/app-error";
 import { errorHandler } from "./middleware/error-handler";
 import { notFoundHandler } from "./middleware/not-found-handler";
+import { noStore } from "./middleware/no-store";
 import { apiRateLimiter } from "./middleware/rate-limiters";
 import { requestContext } from "./middleware/request-context";
 import { apiRoutes } from "./routes";
@@ -53,6 +54,7 @@ export const createApp = (): Express => {
   app.use(apiRateLimiter);
   app.use(express.json({ limit: "10kb" }));
 
+  app.use("/api/v1", noStore);
   app.use("/api/v1", apiRoutes);
   app.use(notFoundHandler);
   app.use(errorHandler);
