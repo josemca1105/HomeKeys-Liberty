@@ -177,8 +177,8 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     assert.equal(secondResponse.status, 201);
     assert.equal(outbox.length, 2);
 
-    const firstToken = /token=([0-9a-f]{64})/.exec(outbox[0]?.text ?? "");
-    const secondToken = /token=([0-9a-f]{64})/.exec(outbox[1]?.text ?? "");
+    const firstToken = /#token=([0-9a-f]{64})/.exec(outbox[0]?.text ?? "");
+    const secondToken = /#token=([0-9a-f]{64})/.exec(outbox[1]?.text ?? "");
     assert.ok(firstToken);
     assert.ok(secondToken);
     assert.notEqual(firstToken[1], secondToken[1]);

@@ -43,6 +43,18 @@ describe("Security and maintenance HTTP integration", { concurrency: false }, ()
     assert.equal(response.body.code, "CORS_ORIGIN_DENIED");
   });
 
+  it("sends Referrer-Policy: no-referrer so URLs never leak through Referer", async () => {
+    const response = await request(app)
+      .post("/api/v1/auth/login")
+      .send({
+        email: "referrer-policy-check@example.com",
+        password: "Wrong-Password1!",
+      });
+
+    assert.equal(response.status, 401);
+    assert.equal(response.headers["referrer-policy"], "no-referrer");
+  });
+
   it("applies the configured trust proxy setting", () => {
     assert.deepEqual(app.get("trust proxy"), environment.TRUST_PROXY);
   });

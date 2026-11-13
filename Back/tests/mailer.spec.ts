@@ -20,7 +20,7 @@ describe("Mailer test guard", () => {
         sendPasswordResetEmail({
           to: "user@example.com",
           firstName: "Test",
-          resetUrl: "https://example.com/reset-password?token=test",
+          resetUrl: "https://example.com/reset-password#token=test",
           expirationMinutes: 15,
         }),
       /Real SMTP delivery is disabled in tests/,

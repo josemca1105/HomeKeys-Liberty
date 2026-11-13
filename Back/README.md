@@ -125,7 +125,7 @@ Configure these variables in `.env`:
 | `SMTP_USER` | SMTP account used to send recovery emails. |
 | `SMTP_APP_PASSWORD` | Gmail app password for `SMTP_USER`. Never commit it. |
 | `SMTP_FROM` | Optional sender header, for example `HomeKeys Liberty <user@example.com>`. |
-| `PASSWORD_RESET_BASE_URL` | Frontend page that receives `?token=<token>` from recovery and invitation emails. |
+| `PASSWORD_RESET_BASE_URL` | Frontend page that reads the recovery token from the URL fragment (`#token=<token>`) in recovery and invitation emails. The fragment never reaches the server, so the token stays out of server logs, proxies and `Referer` headers. |
 | `APP_BASE_URL` | Frontend entry page used by the "Iniciar sesión" button in notice emails. |
 
 Connection string format:
@@ -556,7 +556,7 @@ Public endpoint. Body:
 }
 ```
 
-When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}?token=<token>`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email.
+When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}#token=<token>` — the token travels in the URL fragment, never in the query string, so it cannot reach server logs, proxies or `Referer` headers; the frontend reads it from `window.location.hash`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email.
 
 Token issuance and SMTP delivery run in the background after the generic response is sent. This keeps the response time approximately the same whether the email exists or not, closing the timing side channel that would otherwise reveal registered accounts. Delivery failures are logged server-side and do not change the response. A durable email queue is a future improvement for guaranteed delivery across process restarts.
 

@@ -18,7 +18,9 @@ import type { MockDatabase } from "./helpers/mock-database";
 import { flushBackgroundTasks } from "./helpers/background-tasks";
 
 const extractResetToken = (mail: OutgoingMail): string => {
-  const match = /token=([0-9a-f]+)/.exec(mail.text);
+  // The token must travel in the URL fragment so it never reaches server
+  // logs, proxies or Referer headers.
+  const match = /#token=([0-9a-f]+)/.exec(mail.text);
   assert.ok(match);
   return match[1] as string;
 };
@@ -115,6 +117,13 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     assert.equal(latestMail.attachments?.[0]?.cid, EMAIL_LOGO_CID);
     assert.equal(latestMail.text.includes(latestToken), true);
     assert.equal(latestMail.text.includes("no solicitaste este cambio"), true);
+
+    // The recovery link must carry the token in the URL fragment, never in
+    // the query string: fragments do not reach server logs or Referer headers.
+    assert.equal(latestMail.text.includes(`#token=${latestToken}`), true);
+    assert.equal(latestMail.html.includes(`#token=${latestToken}`), true);
+    assert.equal(latestMail.text.includes("?token="), false);
+    assert.equal(latestMail.html.includes("?token="), false);
 
     // Requesting again leaves only one pending token: the previous one is gone.
     assert.equal(database.passwordResetTokens.length, 1);

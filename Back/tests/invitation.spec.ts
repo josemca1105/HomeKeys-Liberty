@@ -44,7 +44,9 @@ describe("Invitation and forced password change HTTP integration", { concurrency
   });
 
   const extractTokenFromMail = (mail: OutgoingMail): string => {
-    const match = /token=([0-9a-f]+)/.exec(mail.text);
+    // The activation token must travel in the URL fragment so it never
+    // reaches server logs, proxies or Referer headers.
+    const match = /#token=([0-9a-f]+)/.exec(mail.text);
     assert.ok(match);
     return match[1] as string;
   };
@@ -113,6 +115,16 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     const ttlMs = storedToken.expiresAt.getTime() - Date.now();
     assert.equal(ttlMs > 23.9 * 60 * 60 * 1000, true);
     assert.equal(ttlMs <= 24 * 60 * 60 * 1000, true);
+
+    // The activation link must carry the token in the URL fragment, never in
+    // the query string: fragments do not reach server logs or Referer headers.
+    const invitationMail = outbox[outbox.length - 1];
+    assert.ok(invitationMail);
+    const invitationToken = extractTokenFromMail(invitationMail);
+    assert.equal(invitationMail.text.includes(`#token=${invitationToken}`), true);
+    assert.equal(invitationMail.html.includes(`#token=${invitationToken}`), true);
+    assert.equal(invitationMail.text.includes("?token="), false);
+    assert.equal(invitationMail.html.includes("?token="), false);
   });
 
   it("reports email failures without breaking user creation", async () => {

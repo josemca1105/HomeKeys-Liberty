@@ -180,7 +180,7 @@ const sendInvitation = async (user: UserResponse): Promise<boolean> => {
     await sendInvitationEmail({
       to: user.email,
       firstName: user.firstName,
-      activationUrl: `${environment.PASSWORD_RESET_BASE_URL}?token=${activationToken}`,
+      activationUrl: `${environment.PASSWORD_RESET_BASE_URL}#token=${activationToken}`,
       expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
     });
 

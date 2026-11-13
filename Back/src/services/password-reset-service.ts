@@ -93,7 +93,9 @@ const deliverPasswordResetEmail = async (
       user.id,
       PASSWORD_RESET_TOKEN_TTL_MINUTES,
     );
-    const resetUrl = `${environment.PASSWORD_RESET_BASE_URL}?token=${rawToken}`;
+    // The token travels in the URL fragment, never in the query string, so it
+    // stays out of server logs, proxies and Referer headers.
+    const resetUrl = `${environment.PASSWORD_RESET_BASE_URL}#token=${rawToken}`;
 
     await sendPasswordResetEmail({
       to: user.email,

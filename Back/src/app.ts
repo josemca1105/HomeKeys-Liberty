@@ -49,7 +49,10 @@ export const createApp = (): Express => {
         (req as { requestId?: string }).requestId ?? "unknown",
     }),
   );
-  app.use(helmet());
+  // The Referrer-Policy is explicit (it is also the helmet default) so the
+  // recovery token, which travels in the URL fragment, can never leak through
+  // a Referer header, even to a future same-origin page.
+  app.use(helmet({ referrerPolicy: { policy: "no-referrer" } }));
   app.use(cors(createCorsOptions()));
   app.use(apiRateLimiter);
   app.use(express.json({ limit: "10kb" }));
