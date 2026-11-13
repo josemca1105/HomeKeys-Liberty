@@ -2,6 +2,7 @@ import { Prisma, Role } from "@prisma/client";
 import type {
   AuditLog,
   AuditScope,
+  LoginAttempt,
   PasswordResetToken,
   RevokedToken,
   User,
@@ -245,12 +246,38 @@ interface TransactionClientMock {
   property: PropertyDelegateMock;
   revokedToken: RevokedTokenDelegateMock;
   passwordResetToken: PasswordResetTokenDelegateMock;
+  loginAttempt: LoginAttemptDelegateMock;
+}
+
+interface LoginAttemptDelegateMock {
+  findUnique: (args: {
+    where: { email: string };
+  }) => Promise<LoginAttempt | null>;
+  upsert: (args: {
+    where: { email: string };
+    create: {
+      email: string;
+      failedAttempts: number;
+      lockedUntil: Date | null;
+    };
+    update: {
+      failedAttempts: number;
+      lockedUntil: Date | null;
+    };
+  }) => Promise<LoginAttempt>;
+  deleteMany: (args: {
+    where: {
+      email?: string;
+      updatedAt?: { lt?: Date };
+    };
+  }) => Promise<{ count: number }>;
 }
 
 export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
+  loginAttempts: LoginAttempt[];
   auditLogs: AuditLog[];
   getUserCreateCallCount: () => number;
   getUserFindManyCallCount: () => number;
@@ -325,6 +352,7 @@ export const createMockDatabase = (): MockDatabase => {
   ];
   const revokedTokens: RevokedToken[] = [];
   const passwordResetTokens: PasswordResetToken[] = [];
+  const loginAttempts: LoginAttempt[] = [];
   const auditLogs: AuditLog[] = [];
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
@@ -340,6 +368,67 @@ export const createMockDatabase = (): MockDatabase => {
     prisma.passwordResetToken as unknown as PasswordResetTokenDelegateMock;
   const auditLogDelegate =
     prisma.auditLog as unknown as AuditLogDelegateMock;
+  const loginAttemptDelegate =
+    prisma.loginAttempt as unknown as LoginAttemptDelegateMock;
+
+  loginAttemptDelegate.findUnique = async (
+    args,
+  ): Promise<LoginAttempt | null> => {
+    return (
+      loginAttempts.find((attempt) => attempt.email === args.where.email) ??
+      null
+    );
+  };
+
+  loginAttemptDelegate.upsert = async (args): Promise<LoginAttempt> => {
+    const existing = loginAttempts.find(
+      (attempt) => attempt.email === args.where.email,
+    );
+
+    if (existing) {
+      existing.failedAttempts = args.update.failedAttempts;
+      existing.lockedUntil = args.update.lockedUntil;
+      existing.updatedAt = new Date();
+      return { ...existing };
+    }
+
+    const created: LoginAttempt = {
+      email: args.create.email,
+      failedAttempts: args.create.failedAttempts,
+      lockedUntil: args.create.lockedUntil,
+      updatedAt: new Date(),
+    };
+    loginAttempts.push(created);
+    return { ...created };
+  };
+
+  loginAttemptDelegate.deleteMany = async (
+    args,
+  ): Promise<{ count: number }> => {
+    const previousCount = loginAttempts.length;
+    const remaining = loginAttempts.filter((attempt) => {
+      if (
+        args.where.email !== undefined &&
+        attempt.email !== args.where.email
+      ) {
+        return true;
+      }
+
+      const updatedBefore = args.where.updatedAt?.lt;
+
+      if (
+        updatedBefore !== undefined &&
+        attempt.updatedAt.getTime() >= updatedBefore.getTime()
+      ) {
+        return true;
+      }
+
+      return false;
+    });
+
+    loginAttempts.splice(0, loginAttempts.length, ...remaining);
+    return { count: previousCount - remaining.length };
+  };
 
   const findUserRecord = (args: FindUserArgs): User | null => {
     const user = users.find((candidate) => {
@@ -889,6 +978,7 @@ export const createMockDatabase = (): MockDatabase => {
     property: propertyDelegate,
     revokedToken: revokedTokenDelegate,
     passwordResetToken: passwordResetTokenDelegate,
+    loginAttempt: loginAttemptDelegate,
   };
 
   let serializableTransactionQueue: Promise<unknown> = Promise.resolve();
@@ -926,6 +1016,7 @@ export const createMockDatabase = (): MockDatabase => {
     users,
     revokedTokens,
     passwordResetTokens,
+    loginAttempts,
     auditLogs,
     getUserCreateCallCount: (): number => userCreateCallCount,
     getUserFindManyCallCount: (): number => userFindManyCallCount,

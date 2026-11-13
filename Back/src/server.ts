@@ -5,6 +5,7 @@ import { cleanupAuditLogsByRetention } from "./services/audit-retention-service"
 import {
   cleanupExpiredPasswordResetTokens,
   cleanupExpiredRevokedTokens,
+  cleanupStaleLoginAttempts,
 } from "./services/token-cleanup-service";
 
 const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -36,6 +37,12 @@ const runTokenCleanup = async (): Promise<void> => {
 
     if (deletedAuditLogs > 0) {
       console.log(`Removed ${deletedAuditLogs} expired audit logs.`);
+    }
+
+    const deletedLoginAttempts = await cleanupStaleLoginAttempts();
+
+    if (deletedLoginAttempts > 0) {
+      console.log(`Removed ${deletedLoginAttempts} stale login attempts.`);
     }
   } catch (error) {
     console.error("Failed to clean up expired tokens.", error);

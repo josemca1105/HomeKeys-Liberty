@@ -157,6 +157,20 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+// Persistent brute-force protection keyed by the submitted email, including
+// emails that do not belong to any account. Because the row exists for unknown
+// emails too, a locked response never reveals whether an account exists.
+model LoginAttempt {
+  email          String    @id @db.VarChar(255)
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([updatedAt])
+  @@map("login_attempts")
+}
+
 // Append-only security and business activity log. It deliberately has no
 // foreign keys so deleting a user never deletes the history of their actions.
 model AuditLog {

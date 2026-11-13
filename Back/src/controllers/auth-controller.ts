@@ -22,9 +22,12 @@ export const login = asyncHandler(async (req, res): Promise<void> => {
   try {
     result = await authenticateUser(credentials);
   } catch (error) {
+    const isAccountLocked =
+      error instanceof AppError && error.code === "ACCOUNT_LOCKED";
+
     await recordAuditEvent({
       scope: AuditScope.SECURITY,
-      action: "LOGIN_FAILED",
+      action: isAccountLocked ? "ACCOUNT_LOCKED" : "LOGIN_FAILED",
       actor: { email: credentials.email },
       request: getAuditRequestContext(req),
     });

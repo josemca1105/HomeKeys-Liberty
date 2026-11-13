@@ -203,7 +203,7 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 
 The current physical database schema is entirely in English:
 
-- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, and `audit_logs`.
+- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `login_attempts`, and `audit_logs`.
 - User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
@@ -251,7 +251,7 @@ Possible responses:
 - `200`: authenticated successfully.
 - `400`: invalid request body.
 - `401`: invalid credentials.
-- `429`: too many failed login attempts; the limits are 5 failures per 15 minutes per account and 30 per client IP.
+- `429`: the email is temporarily locked (`ACCOUNT_LOCKED`) or the rate limit was exceeded (`TOO_MANY_LOGIN_ATTEMPTS`). Five consecutive failures lock the email for 15 minutes, even across restarts and multiple instances; unknown emails are tracked identically, so a locked response never reveals whether an account exists. The in-memory limits are 5 failures per 15 minutes per account and 30 per client IP.
 
 ### List all users
 
@@ -783,6 +783,7 @@ prisma/migrations/20261103003201_add_user_password_changed_at/
 prisma/migrations/20261105020528_add_user_must_change_password/
 prisma/migrations/20261111000000_add_relations_and_indexes/
 prisma/migrations/20261111120000_add_audit_logs/
+prisma/migrations/20261112130000_add_login_lockout/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -791,7 +792,11 @@ The second one adds `users.must_change_password`, the flag behind the mandatory 
 
 The third one removes any orphaned token rows, adds lookup indexes for token revocation, token recovery, user listing, properties by agent and photos by property, and makes both token tables reference `users` with `ON DELETE CASCADE`. The cascade guarantees that token rows cannot survive a user deleted outside the API.
 
-The fourth one creates the append-only `audit_logs` table, its scope enum and its query indexes. Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
+The fourth one creates the append-only `audit_logs` table, its scope enum and its query indexes.
+
+The fifth one creates the `login_attempts` table behind the persistent account lockout. It is keyed by the submitted email, with no foreign key to `users`, so unknown emails are tracked identically and the lock cannot reveal which accounts exist.
+
+Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
 The password recovery and invitation flows need no other migrations: they reuse the `password_reset_tokens` table created by the initial schema.
 
@@ -806,6 +811,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Expired revoked tokens are removed at startup and every hour.
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
 - Login attempts are rate limited per account and per IP; password changes, administrator mutations, forgot-password and reset-password have dedicated limits; a global API limit covers the remaining routes. Browser origins are restricted by `CORS_ORIGINS`, and `TRUST_PROXY` controls how client IPs are derived behind a reverse proxy. Set `RATE_LIMIT_REDIS_URL` to share the counters across multiple instances.
+- Five consecutive failed logins lock the submitted email for 15 minutes in the `login_attempts` table. Because the row is keyed by email, not by user, unknown emails are locked identically and the lock response cannot be used to discover registered accounts. The lock survives restarts and multiple instances; stale rows are removed after 24 hours. A successful login clears the counter.
 - Authentication events, password changes/resets and user-management mutations are written to `audit_logs` with actor snapshots, IP, user-agent and request ID. The log is append-only, never stores passwords or tokens, and survives user deletion. Audit writes are best-effort: a failed audit insert is logged but does not roll back the business operation.
 - Audit history is retained for 24 months by default (`AUDIT_RETENTION_MONTHS`, minimum 12, maximum 120) and purged automatically by the hourly maintenance job. ADMINs see the full history; PARTNERs only see their own events.
 - HTTP requests are logged with pino using a generated `X-Request-Id`; authorization, cookies and password/token fields are redacted.

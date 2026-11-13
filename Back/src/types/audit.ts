@@ -3,6 +3,7 @@ import type { AuditLog, AuditScope, Prisma, Role } from "@prisma/client";
 export type AuditAction =
   | "LOGIN_SUCCEEDED"
   | "LOGIN_FAILED"
+  | "ACCOUNT_LOCKED"
   | "LOGOUT"
   | "PASSWORD_CHANGED"
   | "PASSWORD_RESET"
