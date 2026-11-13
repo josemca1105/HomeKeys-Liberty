@@ -658,7 +658,14 @@ Import:
 postman/homekeys-liberty-api.postman_collection.json
 ```
 
-The collection keeps a single `Login` request and adds `Change my password`, `Update user`, `Delete user`, `Forgot password`, and `Reset password` next to the read-only and creation requests. Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
+The collection is organized into four folders:
+
+- `Auth`: `Login`, `Forgot password`, `Reset password` and `Logout`.
+- `Users`: `Get current user`, `Get all users` (paginated), `Get user by ID`, `Create user`, `Create user with ADMIN role`, `Update user`, `Change my password` and `Delete user`.
+- `Audit`: `Get audit history`; ADMIN sees all events, PARTNER only its own.
+- `Captaciones`: reserved for the property/captaciones API and intentionally empty for now.
+
+Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
 
 Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Delete user`, `Change my password`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` sends a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
 

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - API",
-    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Delete user, Change my password, Logout. Create user sends a welcome email with a single-use activation link so the new user defines a personal password; the response returns invitationSent and no passwords (data.user.mustChangePassword stays true until the user changes it, and management routes answer 403 PASSWORD_CHANGE_REQUIRED meanwhile). Explicit passwords in the body must satisfy the password policy and are never emailed. Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.",
+    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Delete user, Change my password, Logout. Create user sends a welcome email with a single-use activation link so the new user defines a personal password; the response returns invitationSent and no passwords (data.user.mustChangePassword stays true until the user changes it, and management routes answer 403 PASSWORD_CHANGE_REQUIRED meanwhile). Explicit passwords in the body must satisfy the password policy and are never emailed. Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.\n\nRequests are grouped into folders: Auth, Users, Audit and Captaciones. Captaciones is reserved for the next module.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -54,474 +54,539 @@
   ],
   "item": [
     {
-      "name": "Login",
-      "auth": {
-        "type": "noauth"
-      },
-      "event": [
+      "name": "Auth",
+      "description": "Public authentication and recovery endpoints, plus logout. Login stores accessToken, currentUserId and currentUserRole for the rest of the collection.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "pm.test('Login succeeds', function () {",
-              "    pm.response.to.have.status(200);",
-              "    pm.expect(responseBody.success).to.eql(true);",
-              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "});",
-              "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
-              "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
-              "    pm.collectionVariables.set('currentUserId', String(responseBody.data.user.id));",
-              "    pm.collectionVariables.set('currentUserRole', responseBody.data.user.role);",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "auth": {
-          "type": "noauth"
-        },
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"email\": \"{{loginEmail}}\",\n  \"password\": \"{{loginPassword}}\"\n}"
-        },
-        "url": "{{baseUrl}}/auth/login"
-      },
-      "response": []
-    },
-    {
-      "name": "Get current user",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "pm.test('Current user profile succeeds', function () {",
-              "    pm.response.to.have.status(200);",
-              "    pm.expect(String(responseBody.data.user.id)).to.eql(pm.collectionVariables.get('currentUserId'));",
-              "    pm.expect(responseBody.data.user.role).to.eql(pm.collectionVariables.get('currentUserRole'));",
-              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/users/me"
-      },
-      "response": []
-    },
-    {
-      "name": "Get all users",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can list users', function () {",
-              "        pm.response.to.have.status(200);",
-              "        pm.expect(responseBody.data.users).to.be.an('array');",
-              "        responseBody.data.users.forEach(function (user) {",
-              "            pm.expect(user).to.not.have.property('passwordHash');",
-              "        });",
-              "    });",
-              "} else {",
-              "    pm.test('PARTNER cannot list users', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/users"
-      },
-      "response": []
-    },
-    {
-      "name": "Get user by ID",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can fetch a user by ID', function () {",
-              "        pm.response.to.have.status(200);",
-              "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "    });",
-              "} else {",
-              "    pm.test('PARTNER cannot fetch a user by ID', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/users/{{currentUserId}}"
-      },
-      "response": []
-    },
-    {
-      "name": "Create user",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can create a PARTNER user', function () {",
-              "        pm.response.to.have.status(201);",
-              "        pm.expect(responseBody.data.user.role).to.eql('PARTNER');",
-              "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "    });",
-              "    pm.test('ADMIN triggers an invitation email', function () {",
-              "        pm.expect(responseBody.data.invitationSent).to.eql(true);",
-              "        pm.expect(responseBody.data).to.not.have.property('temporaryPassword');",
-              "        pm.expect(responseBody.data.user.mustChangePassword).to.eql(true);",
-              "    });",
-              "    if (pm.response.code === 201 && responseBody.data && responseBody.data.user) {",
-              "        pm.collectionVariables.set('targetUserId', String(responseBody.data.user.id));",
-              "    }",
-              "} else {",
-              "    pm.test('PARTNER cannot create a user', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"email\": \"user-{{$timestamp}}@example.com\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null\n}"
-        },
-        "url": "{{baseUrl}}/users/add"
-      },
-      "response": []
-    },
-    {
-      "name": "Create user with ADMIN role",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can create an ADMIN user', function () {",
-              "        pm.response.to.have.status(201);",
-              "        pm.expect(responseBody.data.user.role).to.eql('ADMIN');",
-              "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "    });",
-              "} else {",
-              "    pm.test('PARTNER cannot create an ADMIN user', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Administrator\",\n  \"email\": \"admin-user-{{$timestamp}}@example.com\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"ADMIN\"\n}"
-        },
-        "url": "{{baseUrl}}/users/add"
-      },
-      "response": []
-    },
-    {
-      "name": "Update user",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can update a user', function () {",
-              "        pm.response.to.have.status(200);",
-              "        pm.expect(responseBody.message).to.eql('Usuario actualizado exitosamente.');",
-              "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "    });",
-              "} else {",
-              "    pm.test('PARTNER cannot update a user', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "PATCH",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Updated\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"PARTNER\"\n}"
-        },
-        "url": {
-          "raw": "{{baseUrl}}/users/{{targetUserId}}",
-          "host": [
-            "{{baseUrl}}"
+          "name": "Login",
+          "auth": {
+            "type": "noauth"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Login succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.success).to.eql(true);",
+                  "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "});",
+                  "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
+                  "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
+                  "    pm.collectionVariables.set('currentUserId', String(responseBody.data.user.id));",
+                  "    pm.collectionVariables.set('currentUserRole', responseBody.data.user.role);",
+                  "}"
+                ]
+              }
+            }
           ],
-          "path": [
-            "users",
-            "{{targetUserId}}"
-          ]
-        }
-      },
-      "response": []
-    },
-    {
-      "name": "Delete user",
-      "event": [
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{loginEmail}}\",\n  \"password\": \"{{loginPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "response": []
+        },
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "const role = pm.collectionVariables.get('currentUserRole');",
-              "if (role === 'ADMIN') {",
-              "    pm.test('ADMIN can delete a user', function () {",
-              "        pm.response.to.have.status(200);",
-              "        pm.expect(responseBody.message).to.eql('Usuario eliminado exitosamente.');",
-              "        pm.expect(String(responseBody.data.deletedId)).to.eql(pm.collectionVariables.get('targetUserId'));",
-              "        pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
-              "    });",
-              "} else {",
-              "    pm.test('PARTNER cannot delete a user', function () {",
-              "        pm.response.to.have.status(403);",
-              "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
-              "    });",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "DELETE",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/users/{{targetUserId}}",
-          "host": [
-            "{{baseUrl}}"
+          "name": "Forgot password",
+          "auth": {
+            "type": "noauth"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Forgot password answers generically', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.message).to.eql('Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.');",
+                  "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+                  "});",
+                  "pm.test('Forgot password leaks no user data', function () {",
+                  "    pm.expect(responseBody.data).to.eql({});",
+                  "});"
+                ]
+              }
+            }
           ],
-          "path": [
-            "users",
-            "{{targetUserId}}"
-          ]
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{loginEmail}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/forgot-password"
+          },
+          "response": []
+        },
+        {
+          "name": "Reset password",
+          "auth": {
+            "type": "noauth"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Reset password succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.message).to.eql('Contraseña restablecida exitosamente.');",
+                  "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('loginPassword', pm.collectionVariables.get('newUserPassword'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/reset-password"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Logout succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "response": []
         }
-      },
-      "response": []
+      ]
     },
     {
-      "name": "Change my password",
-      "event": [
+      "name": "Users",
+      "description": "Own profile and password, plus ADMIN user management. Role-dependent assertions adapt to the authenticated user.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "pm.test('Password change succeeds', function () {",
-              "    pm.response.to.have.status(200);",
-              "    pm.expect(responseBody.message).to.eql('Contraseña actualizada exitosamente.');",
-              "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
-              "});",
-              "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
-              "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
-              "    pm.collectionVariables.set('loginPassword', pm.collectionVariables.get('newUserPassword'));",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "PATCH",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
+          "name": "Get current user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Current user profile succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(String(responseBody.data.user.id)).to.eql(pm.collectionVariables.get('currentUserId'));",
+                  "    pm.expect(responseBody.data.user.role).to.eql(pm.collectionVariables.get('currentUserRole'));",
+                  "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me"
+          },
+          "response": []
         },
-        "url": "{{baseUrl}}/users/me/password"
-      },
-      "response": []
+        {
+          "name": "Get all users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can list users', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.users).to.be.an('array');",
+                  "        pm.expect(responseBody.data.pagination).to.be.an('object');",
+                  "        pm.expect(responseBody.data.pagination.page).to.eql(1);",
+                  "        pm.expect(responseBody.data.pagination.pageSize).to.eql(20);",
+                  "        responseBody.data.users.forEach(function (user) {",
+                  "            pm.expect(user).to.not.have.property('passwordHash');",
+                  "        });",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot list users', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users?page=1&pageSize=20"
+          },
+          "response": []
+        },
+        {
+          "name": "Get user by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can fetch a user by ID', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot fetch a user by ID', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{currentUserId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Create user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can create a PARTNER user', function () {",
+                  "        pm.response.to.have.status(201);",
+                  "        pm.expect(responseBody.data.user.role).to.eql('PARTNER');",
+                  "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "    });",
+                  "    pm.test('ADMIN triggers an invitation email', function () {",
+                  "        pm.expect(responseBody.data.invitationSent).to.eql(true);",
+                  "        pm.expect(responseBody.data).to.not.have.property('temporaryPassword');",
+                  "        pm.expect(responseBody.data.user.mustChangePassword).to.eql(true);",
+                  "    });",
+                  "    if (pm.response.code === 201 && responseBody.data && responseBody.data.user) {",
+                  "        pm.collectionVariables.set('targetUserId', String(responseBody.data.user.id));",
+                  "    }",
+                  "} else {",
+                  "    pm.test('PARTNER cannot create a user', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"email\": \"user-{{$timestamp}}@example.com\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null\n}"
+            },
+            "url": "{{baseUrl}}/users/add"
+          },
+          "response": []
+        },
+        {
+          "name": "Create user with ADMIN role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can create an ADMIN user', function () {",
+                  "        pm.response.to.have.status(201);",
+                  "        pm.expect(responseBody.data.user.role).to.eql('ADMIN');",
+                  "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot create an ADMIN user', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Administrator\",\n  \"email\": \"admin-user-{{$timestamp}}@example.com\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"ADMIN\"\n}"
+            },
+            "url": "{{baseUrl}}/users/add"
+          },
+          "response": []
+        },
+        {
+          "name": "Update user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can update a user', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.message).to.eql('Usuario actualizado exitosamente.');",
+                  "        pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot update a user', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Updated\",\n  \"phone\": \"00000000\",\n  \"photoUrl\": null,\n  \"role\": \"PARTNER\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change my password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Password change succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.message).to.eql('Contraseña actualizada exitosamente.');",
+                  "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "});",
+                  "if (pm.response.code === 200 && responseBody.data && responseBody.data.token) {",
+                  "    pm.collectionVariables.set('accessToken', responseBody.data.token);",
+                  "    pm.collectionVariables.set('loginPassword', pm.collectionVariables.get('newUserPassword'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{loginPassword}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/users/me/password"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can delete a user', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.message).to.eql('Usuario eliminado exitosamente.');",
+                  "        pm.expect(String(responseBody.data.deletedId)).to.eql(pm.collectionVariables.get('targetUserId'));",
+                  "        pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot delete a user', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     },
     {
-      "name": "Forgot password",
-      "auth": {
-        "type": "noauth"
-      },
-      "event": [
+      "name": "Audit",
+      "description": "Append-only security and business audit history. ADMIN sees every event; PARTNER only sees its own.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "pm.test('Forgot password answers generically', function () {",
-              "    pm.response.to.have.status(200);",
-              "    pm.expect(responseBody.message).to.eql('Si el correo está registrado, recibirás un mensaje para restablecer tu contraseña.');",
-              "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
-              "});",
-              "pm.test('Forgot password leaks no user data', function () {",
-              "    pm.expect(responseBody.data).to.eql({});",
-              "});"
-            ]
-          }
+          "name": "Get audit history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "const currentUserId = Number(pm.collectionVariables.get('currentUserId'));",
+                  "pm.test('Audit history succeeds', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.logs).to.be.an('array');",
+                  "    pm.expect(responseBody.data.pagination).to.be.an('object');",
+                  "    pm.expect(responseBody.data.pagination.page).to.eql(1);",
+                  "    pm.expect(responseBody.data.pagination.pageSize).to.eql(20);",
+                  "});",
+                  "pm.test('Audit entries expose no password hashes', function () {",
+                  "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
+                  "});",
+                  "if (role === 'PARTNER') {",
+                  "    pm.test('PARTNER sees only own audit events', function () {",
+                  "        responseBody.data.logs.forEach(function (log) {",
+                  "            pm.expect(log.actorId).to.eql(currentUserId);",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/audit-logs?page=1&pageSize=20"
+          },
+          "response": []
         }
-      ],
-      "request": {
-        "auth": {
-          "type": "noauth"
-        },
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"email\": \"{{loginEmail}}\"\n}"
-        },
-        "url": "{{baseUrl}}/auth/forgot-password"
-      },
-      "response": []
+      ]
     },
     {
-      "name": "Reset password",
-      "auth": {
-        "type": "noauth"
-      },
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const responseBody = pm.response.json();",
-              "pm.test('Reset password succeeds', function () {",
-              "    pm.response.to.have.status(200);",
-              "    pm.expect(responseBody.message).to.eql('Contraseña restablecida exitosamente.');",
-              "    pm.expect(JSON.stringify(responseBody)).to.not.include('passwordHash');",
-              "});",
-              "if (pm.response.code === 200) {",
-              "    pm.collectionVariables.set('loginPassword', pm.collectionVariables.get('newUserPassword'));",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "auth": {
-          "type": "noauth"
-        },
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{newUserPassword}}\"\n}"
-        },
-        "url": "{{baseUrl}}/auth/reset-password"
-      },
-      "response": []
-    },
-    {
-      "name": "Logout",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Logout succeeds', function () {",
-              "    pm.response.to.have.status(200);",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [],
-        "url": "{{baseUrl}}/auth/logout"
-      },
-      "response": []
+      "name": "Captaciones",
+      "description": "Reserved for the property/captaciones API. It will be completed after the Users module is finished.",
+      "item": []
     }
   ]
 }
