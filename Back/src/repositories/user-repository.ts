@@ -11,6 +11,7 @@ const userResponseSelect = {
   phone: true,
   photoUrl: true,
   role: true,
+  isActive: true,
   mustChangePassword: true,
   createdAt: true,
   updatedAt: true,
@@ -39,6 +40,7 @@ export interface UpdateUserData {
   phone?: string;
   photoUrl?: string | null;
   role?: Role;
+  isActive?: boolean;
   passwordChangedAt?: Date;
   mustChangePassword?: boolean;
 }
@@ -65,7 +67,15 @@ export const findUserByEmail = async (
 export const findUserAuthorizationById = async (
   userId: number,
 ): Promise<
-  Pick<User, "id" | "role" | "passwordChangedAt" | "mustChangePassword"> | null
+  | Pick<
+      User,
+      | "id"
+      | "role"
+      | "passwordChangedAt"
+      | "mustChangePassword"
+      | "isActive"
+    >
+  | null
 > => {
   return prisma.user.findUnique({
     where: { id: userId },
@@ -74,6 +84,7 @@ export const findUserAuthorizationById = async (
       role: true,
       passwordChangedAt: true,
       mustChangePassword: true,
+      isActive: true,
     },
   });
 };
@@ -181,12 +192,12 @@ export const updateUserAndInvalidateResetTokens = async (
   });
 };
 
-export const countUsersByRole = async (
+export const countActiveUsersByRole = async (
   role: Role,
   client: UserRepositoryClient = prisma,
 ): Promise<number> => {
   return client.user.count({
-    where: { role },
+    where: { role, isActive: true },
   });
 };
 

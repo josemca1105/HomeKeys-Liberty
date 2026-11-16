@@ -51,6 +51,7 @@ interface DeleteUserArgs {
 
 interface UserWhereMock {
   role?: Role;
+  isActive?: boolean;
   OR?: Array<{
     firstName?: { contains: string; mode?: string };
     lastName?: { contains: string; mode?: string };
@@ -307,6 +308,7 @@ const createUser = (
     phone: "00000000",
     photoUrl: null,
     role,
+    isActive: true,
     mustChangePassword: false,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -461,6 +463,13 @@ export const createMockDatabase = (): MockDatabase => {
     }
 
     if (where.role !== undefined && user.role !== where.role) {
+      return false;
+    }
+
+    if (
+      where.isActive !== undefined &&
+      user.isActive !== where.isActive
+    ) {
       return false;
     }
 

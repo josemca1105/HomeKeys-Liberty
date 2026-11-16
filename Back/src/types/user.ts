@@ -22,6 +22,7 @@ export interface UpdateUserInput {
   phone?: string;
   photoUrl?: string | null;
   role?: Role;
+  isActive?: boolean;
   password?: string;
 }
 
@@ -48,6 +49,7 @@ export interface UserResponse {
   phone: string;
   photoUrl: string | null;
   role: Role;
+  isActive: boolean;
   mustChangePassword: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -67,6 +69,7 @@ export interface ListUsersQuery {
   pageSize: number;
   search?: string;
   role?: Role;
+  isActive?: boolean;
   sortBy: UserSortField;
   sortOrder: SortOrder;
 }

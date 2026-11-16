@@ -1,9 +1,9 @@
 import { Prisma, Role } from "@prisma/client";
 import { environment } from "../config/env";
 import {
+  countActiveUsersByRole,
   countPropertiesByAgentId,
   countUsers,
-  countUsersByRole,
   createUserRecord,
   deleteUserWithRelatedTokens,
   findUserByEmail,
@@ -84,6 +84,14 @@ const selfDeletionNotAllowedError = (): AppError => {
   });
 };
 
+const selfDeactivationNotAllowedError = (): AppError => {
+  return new AppError({
+    statusCode: 409,
+    code: "SELF_DEACTIVATION_NOT_ALLOWED",
+    message: "No puedes desactivar tu propia cuenta.",
+  });
+};
+
 const userHasPropertiesError = (): AppError => {
   return new AppError({
     statusCode: 409,
@@ -104,6 +112,10 @@ const buildUserWhere = (query: ListUsersQuery): Prisma.UserWhereInput => {
 
   if (query.role !== undefined) {
     where.role = query.role;
+  }
+
+  if (query.isActive !== undefined) {
+    where.isActive = query.isActive;
   }
 
   if (query.search !== undefined) {
@@ -303,6 +315,10 @@ export const updateUserByAdmin = async (
     throw userNotFoundError("actualizar");
   }
 
+  if (input.isActive === false && targetUserId === actingUserId) {
+    throw selfDeactivationNotAllowedError();
+  }
+
   const newEmail = input.email;
   const isEmailChangingFromSnapshot =
     newEmail !== undefined && newEmail !== currentTarget.email;
@@ -344,14 +360,25 @@ export const updateUserByAdmin = async (
           input.role !== undefined &&
           input.role !== Role.ADMIN &&
           targetUser.role === Role.ADMIN;
+        const isDeactivating =
+          input.isActive === false && targetUser.isActive;
+        const isReactivating =
+          input.isActive === true && !targetUser.isActive;
 
-        if (isDemotingAdmin) {
-          const adminCount = await countUsersByRole(
+        // Only active administrators keep the system operable: demoting or
+        // deactivating the last one would leave no one able to manage users.
+        const removesActiveAdmin =
+          targetUser.role === Role.ADMIN &&
+          targetUser.isActive &&
+          (isDemotingAdmin || isDeactivating);
+
+        if (removesActiveAdmin) {
+          const activeAdminCount = await countActiveUsersByRole(
             Role.ADMIN,
             transaction,
           );
 
-          if (adminCount <= 1) {
+          if (activeAdminCount <= 1) {
             throw lastAdminRequiredError();
           }
         }
@@ -372,7 +399,16 @@ export const updateUserByAdmin = async (
             ? { photoUrl: input.photoUrl }
             : {}),
           ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(input.isActive !== undefined
+            ? { isActive: input.isActive }
+            : {}),
         };
+
+        if (isReactivating) {
+          // Tokens issued before the deactivation must not become valid again
+          // when the account is reactivated.
+          updateData.passwordChangedAt = passwordChangeTimestamp();
+        }
 
         if (passwordHash !== null) {
           updateData.passwordHash = passwordHash;
@@ -381,7 +417,7 @@ export const updateUserByAdmin = async (
         }
 
         const shouldInvalidateResetTokens =
-          isChangingPassword || isChangingEmail;
+          isChangingPassword || isChangingEmail || isDeactivating;
 
         return shouldInvalidateResetTokens
           ? updateUserAndInvalidateResetTokens(
@@ -445,16 +481,16 @@ export const deleteUserByAdmin = async (
         throw userNotFoundError("eliminar");
       }
 
-      // A sole ADMIN deleting itself is reported as LAST_ADMIN_REQUIRED
-      // because the system would be left without administrators; self
-      // deletion is only reported when at least one other ADMIN remains.
-      if (targetUser.role === Role.ADMIN) {
-        const adminCount = await countUsersByRole(
+      // A sole active ADMIN deleting itself is reported as LAST_ADMIN_REQUIRED
+      // because the system would be left without active administrators; self
+      // deletion is only reported when at least one other active ADMIN remains.
+      if (targetUser.role === Role.ADMIN && targetUser.isActive) {
+        const activeAdminCount = await countActiveUsersByRole(
           Role.ADMIN,
           transaction,
         );
 
-        if (adminCount <= 1) {
+        if (activeAdminCount <= 1) {
           throw lastAdminRequiredError();
         }
       }

@@ -51,6 +51,12 @@ export const listUsersQuerySchema: z.ZodType<ListUsersQuery> = z.strictObject(
       .max(100, "La búsqueda no puede tener más de 100 caracteres.")
       .optional(),
     role: roleSchema.optional(),
+    isActive: z
+      .enum(["true", "false"], {
+        error: "El estado de la cuenta debe ser true o false.",
+      })
+      .transform((value) => value === "true")
+      .optional(),
     sortBy: z
       .enum(["createdAt", "firstName", "lastName", "email", "role"], {
         error: "El campo de ordenamiento no es válido.",
@@ -170,6 +176,11 @@ export const updateUserSchema = z
         .optional(),
       photoUrl: photoUrlSchema,
       role: roleSchema.optional(),
+      isActive: z
+        .boolean({
+          error: "El estado de la cuenta debe ser verdadero o falso.",
+        })
+        .optional(),
       password: createPasswordSchema(
         "La contraseña es obligatoria.",
         "La contraseña debe ser un texto.",

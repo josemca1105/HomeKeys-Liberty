@@ -39,6 +39,15 @@ const accountLockedError = (): AppError => {
   });
 };
 
+const accountInactiveError = (): AppError => {
+  return new AppError({
+    statusCode: 403,
+    code: "ACCOUNT_INACTIVE",
+    message:
+      "Tu cuenta está desactivada. Contacta a un administrador para reactivarla.",
+  });
+};
+
 const isLoginLocked = (
   loginAttempt: Awaited<ReturnType<typeof findLoginAttemptByEmail>>,
   now: Date,
@@ -73,6 +82,13 @@ export const authenticateUser = async ({
       lockDurationMs: LOGIN_LOCK_MS,
     });
     throw invalidCredentialsError();
+  }
+
+  // Only revealed after a valid password, so deactivated accounts cannot be
+  // discovered by guessing emails: a wrong password still returns the generic
+  // INVALID_CREDENTIALS response.
+  if (!user.isActive) {
+    throw accountInactiveError();
   }
 
   if (loginAttempt !== null) {

@@ -14,6 +14,7 @@ import type {
   ListUsersQuery,
   UpdateUserInput,
 } from "../types/user";
+import type { AuditAction } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { getAuditActor, getAuditRequestContext } from "../utils/audit-context";
 import { asyncHandler } from "../utils/async-handler";
@@ -135,10 +136,18 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
     session.userId,
   );
 
+  const auditAction: AuditAction =
+    input.password !== undefined
+      ? "USER_PASSWORD_RESET"
+      : input.isActive === false
+        ? "USER_DEACTIVATED"
+        : input.isActive === true
+          ? "USER_REACTIVATED"
+          : "USER_UPDATED";
+
   await recordAuditEvent({
     scope: AuditScope.SECURITY,
-    action:
-      input.password !== undefined ? "USER_PASSWORD_RESET" : "USER_UPDATED",
+    action: auditAction,
     actor: getAuditActor(session),
     entityType: "USER",
     entityId: user.id,
@@ -147,6 +156,7 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
       passwordChanged: input.password !== undefined,
       email: user.email,
       role: user.role,
+      isActive: user.isActive,
     },
     request: getAuditRequestContext(req),
   });

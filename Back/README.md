@@ -33,6 +33,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - ADMIN user listing with pagination, search, role filters and sorting; PARTNER is limited to its own profile.
 - ADMIN user editing and deletion with last-admin, self-deletion, and property-relation protections.
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
+- Account deactivation and reactivation without deleting history: deactivated accounts cannot sign in or keep using existing sessions.
 - Automatic email invitations for administrator-created users, with a single-use activation link.
 - Password policy with a 12-character minimum, four character classes and a common-password blocklist on every password defined through the API.
 - Mandatory password change for accounts created or reset by an ADMIN.
@@ -251,6 +252,7 @@ Possible responses:
 - `200`: authenticated successfully.
 - `400`: invalid request body.
 - `401`: invalid credentials.
+- `403 ACCOUNT_INACTIVE`: the password is correct, but the account has been deactivated. Wrong passwords on inactive accounts still return the generic `401`, so the state cannot be discovered without the password.
 - `429`: the email is temporarily locked (`ACCOUNT_LOCKED`) or the rate limit was exceeded (`TOO_MANY_LOGIN_ATTEMPTS`). Five consecutive failures lock the email for 15 minutes, even across restarts and multiple instances; unknown emails are tracked identically, so a locked response never reveals whether an account exists. The in-memory limits are 5 failures per 15 minutes per account and 30 per client IP.
 
 ### List all users
@@ -270,6 +272,7 @@ Supported query parameters:
 | `pageSize` | `20` | Integer between 1 and 100. |
 | `search` | none | Up to 100 characters; case-insensitive match on first name, last name, email or phone. |
 | `role` | none | `ADMIN` or `PARTNER`. |
+| `isActive` | none | `true` or `false`; filters active or deactivated accounts. |
 | `sortBy` | `createdAt` | `createdAt`, `firstName`, `lastName`, `email` or `role`. |
 | `sortOrder` | `desc` | `asc` or `desc`. |
 
@@ -299,6 +302,7 @@ Possible responses:
 - `400 VALIDATION_ERROR`: invalid page, pageSize, sort, role or unknown query parameter.
 - `401`: missing, invalid, expired, or revoked token.
 - `403`: authenticated user is not an administrator.
+- `403 ACCOUNT_INACTIVE`: the authenticated account has been deactivated.
 
 ### Get the current authenticated user
 
@@ -313,6 +317,7 @@ Possible responses:
 
 - `200`: current user profile returned successfully.
 - `401`: missing, invalid, expired, or revoked token.
+- `403 ACCOUNT_INACTIVE`: the authenticated account has been deactivated.
 
 ### Get a user by ID
 
@@ -437,18 +442,20 @@ Only `ADMIN` users can access this endpoint. `ADMIN` can edit any user, includin
   "phone": "00000000",
   "photoUrl": null,
   "role": "PARTNER",
+  "isActive": true,
   "password": "OPTIONAL_NEW_PASSWORD"
 }
 ```
 
 Validation rules:
 
-- Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, and `password`. Unknown fields are rejected, including `id`, `createdAt`, and `updatedAt`.
+- Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, `isActive`, and `password`. Unknown fields are rejected, including `id`, `createdAt`, and `updatedAt`.
 - `photoUrl` must be an absolute `http` or `https` URL without embedded credentials; `null` clears it. Literal localhost, private, link-local and internal hosts are rejected.
 - `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address.
 - `role` accepts only `ADMIN` or `PARTNER`.
+- `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, and deletes pending invitation or recovery links. Reactivation invalidates every session issued before the deactivation, so users must sign in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
 - `password` is optional and allows an administrator to set a new password without knowing the current one. It is hashed with bcrypt, invalidates every session previously issued for that user, and deletes any pending invitation or password recovery link.
-- Demoting the last `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; an `ADMIN` can demote itself whenever another `ADMIN` remains. The check and the update run in the same serializable transaction, so concurrent demotions cannot leave the system without administrators.
+- Demoting or deactivating the last active `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; inactive administrators do not count. An `ADMIN` can demote itself whenever another active `ADMIN` remains. The check and the update run in the same serializable transaction, so concurrent changes cannot leave the system without active administrators.
 - When an `ADMIN` resets its own password through this endpoint, the response also includes a fresh `data.token` so the current session continues.
 
 Possible responses:
@@ -457,9 +464,11 @@ Possible responses:
 - `400 VALIDATION_ERROR`: invalid body or invalid field values.
 - `401`: missing, invalid, expired, or revoked token.
 - `403 ADMIN_REQUIRED`: authenticated user is not an administrator.
+- `403 ACCOUNT_INACTIVE`: the authenticated account has been deactivated.
 - `404 USER_NOT_FOUND`: nonexistent ID.
 - `409 EMAIL_ALREADY_REGISTERED`: the new email belongs to another user.
-- `409 LAST_ADMIN_REQUIRED`: the change would leave the system without administrators.
+- `409 LAST_ADMIN_REQUIRED`: the change would leave the system without active administrators.
+- `409 SELF_DEACTIVATION_NOT_ALLOWED`: the target is the authenticated administrator and `isActive` is `false`.
 
 ### Delete a user
 
@@ -476,6 +485,8 @@ Deletion rules:
 - The last `ADMIN` cannot be deleted: `409 LAST_ADMIN_REQUIRED`. This check runs before the self-deletion check, so a sole administrator deleting itself receives `LAST_ADMIN_REQUIRED`.
 - A user with registered properties cannot be deleted: `409 USER_HAS_PROPERTIES`. Property data is never removed automatically; reassign or delete those properties first after an explicit product decision.
 - Users without relations are deleted in a single transaction that also removes their `revoked_tokens` and `password_reset_tokens` rows.
+
+To disable access without deleting anything, use `PATCH /users/:id` with `"isActive": false`: the account keeps its history, properties, and audit trail, while logins and existing sessions are blocked. Physical deletion remains available for accounts without properties when the product explicitly wants them gone.
 
 Possible responses:
 
@@ -652,7 +663,7 @@ Errors use a consistent structure:
 
 Unexpected errors return a generic Spanish message without exposing SQL queries, stack traces, tokens, or credentials.
 
-User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`.
+User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
 
 ## Postman collection
 
@@ -784,6 +795,7 @@ prisma/migrations/20261105020528_add_user_must_change_password/
 prisma/migrations/20261111000000_add_relations_and_indexes/
 prisma/migrations/20261111120000_add_audit_logs/
 prisma/migrations/20261112130000_add_login_lockout/
+prisma/migrations/20261112140000_add_user_is_active/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -795,6 +807,8 @@ The third one removes any orphaned token rows, adds lookup indexes for token rev
 The fourth one creates the append-only `audit_logs` table, its scope enum and its query indexes.
 
 The fifth one creates the `login_attempts` table behind the persistent account lockout. It is keyed by the submitted email, with no foreign key to `users`, so unknown emails are tracked identically and the lock cannot reveal which accounts exist.
+
+The sixth one adds `users.is_active` for account deactivation. Deactivated accounts keep every relation and audit row, but login and existing sessions are blocked with `403 ACCOUNT_INACTIVE`; reactivation invalidates the sessions issued before the deactivation.
 
 Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
@@ -819,6 +833,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are shown only once in the creation response, and are stored only as bcrypt hashes.
 - The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
+- Deactivating an account blocks login and every existing session immediately (`403 ACCOUNT_INACTIVE`), without deleting the user, their properties or their audit history. Reactivation clears the block but invalidates sessions issued before the deactivation, so the user must sign in again.
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction. Database foreign keys also cascade those rows if a user is deleted outside the API.

@@ -63,6 +63,10 @@ model User {
   photoUrl     String? @map("photo_url")
   role         Role    @default(PARTNER)
 
+  // Deactivated accounts keep all their history but cannot sign in or use
+  // existing sessions. ADMIN users can reactivate them later.
+  isActive Boolean @default(true) @map("is_active")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

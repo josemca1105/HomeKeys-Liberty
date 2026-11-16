@@ -73,6 +73,15 @@ const createAuthenticate = (allowRevokedToken: boolean): RequestHandler => {
         throw createSessionError();
       }
 
+      if (!user.isActive) {
+        throw new AppError({
+          statusCode: 403,
+          code: "ACCOUNT_INACTIVE",
+          message:
+            "Tu cuenta está desactivada. Contacta a un administrador para reactivarla.",
+        });
+      }
+
       if (
         user.passwordChangedAt !== null &&
         tokenPayload.issuedAt.getTime() < user.passwordChangedAt.getTime()
