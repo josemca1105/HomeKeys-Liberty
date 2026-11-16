@@ -6,6 +6,7 @@ declare global {
       auth?: AuthSession;
       requestId?: string;
       validatedQuery?: unknown;
+      validatedParams?: unknown;
     }
   }
 }

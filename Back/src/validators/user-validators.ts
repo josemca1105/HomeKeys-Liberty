@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { ListUsersQuery } from "../types/user";
 import {
+  emailSchema,
+  phoneSchema,
+  createPersonNameSchema,
+} from "./common-schemas";
+import {
   createPasswordSchema,
   strictObjectError,
 } from "./password-schema";
@@ -27,6 +32,8 @@ export const userIdParamsSchema = z.object(
   },
   { error: "El ID del usuario debe ser un número entero positivo." },
 );
+
+export type UserIdParams = z.infer<typeof userIdParamsSchema>;
 
 export const listUsersQuerySchema: z.ZodType<ListUsersQuery> = z.strictObject(
   {
@@ -71,46 +78,20 @@ export const listUsersQuerySchema: z.ZodType<ListUsersQuery> = z.strictObject(
   { error: strictQueryError },
 );
 
-export const createUserSchema = z.object(
+export const createUserSchema = z.strictObject(
   {
-    firstName: createRequiredStringSchema(
-      "El nombre es obligatorio.",
-      "El nombre debe ser un texto.",
-    )
-      .trim()
-      .min(1, "El nombre es obligatorio.")
-      .max(100, "El nombre no puede tener más de 100 caracteres."),
-    lastName: createRequiredStringSchema(
-      "El apellido es obligatorio.",
-      "El apellido debe ser un texto.",
-    )
-      .trim()
-      .min(1, "El apellido es obligatorio.")
-      .max(100, "El apellido no puede tener más de 100 caracteres."),
-    email: createRequiredStringSchema(
-      "El correo es obligatorio.",
-      "El correo debe ser un texto.",
-    )
-      .trim()
-      .toLowerCase()
-      .min(1, "El correo es obligatorio.")
-      .max(255, "El correo no puede tener más de 255 caracteres.")
-      .email("Debes ingresar un correo electrónico válido."),
+    firstName: createPersonNameSchema("nombre"),
+    lastName: createPersonNameSchema("apellido"),
+    email: emailSchema,
     password: createPasswordSchema(
       "La contraseña es obligatoria.",
       "La contraseña debe ser un texto.",
     ).optional(),
-    phone: createRequiredStringSchema(
-      "El teléfono es obligatorio.",
-      "El teléfono debe ser un texto.",
-    )
-      .trim()
-      .min(1, "El teléfono es obligatorio.")
-      .max(20, "El teléfono no puede tener más de 20 caracteres."),
+    phone: phoneSchema,
     photoUrl: photoUrlSchema,
     role: roleSchema.optional(),
   },
-  { error: "El cuerpo de la petición debe ser un objeto JSON." },
+  { error: strictObjectError },
 );
 
 export const changePasswordSchema = z
@@ -140,40 +121,10 @@ export const changePasswordSchema = z
 export const updateUserSchema = z
   .strictObject(
     {
-      firstName: createRequiredStringSchema(
-        "El nombre es obligatorio.",
-        "El nombre debe ser un texto.",
-      )
-        .trim()
-        .min(1, "El nombre es obligatorio.")
-        .max(100, "El nombre no puede tener más de 100 caracteres.")
-        .optional(),
-      lastName: createRequiredStringSchema(
-        "El apellido es obligatorio.",
-        "El apellido debe ser un texto.",
-      )
-        .trim()
-        .min(1, "El apellido es obligatorio.")
-        .max(100, "El apellido no puede tener más de 100 caracteres.")
-        .optional(),
-      email: createRequiredStringSchema(
-        "El correo es obligatorio.",
-        "El correo debe ser un texto.",
-      )
-        .trim()
-        .toLowerCase()
-        .min(1, "El correo es obligatorio.")
-        .max(255, "El correo no puede tener más de 255 caracteres.")
-        .email("Debes ingresar un correo electrónico válido.")
-        .optional(),
-      phone: createRequiredStringSchema(
-        "El teléfono es obligatorio.",
-        "El teléfono debe ser un texto.",
-      )
-        .trim()
-        .min(1, "El teléfono es obligatorio.")
-        .max(20, "El teléfono no puede tener más de 20 caracteres.")
-        .optional(),
+      firstName: createPersonNameSchema("nombre").optional(),
+      lastName: createPersonNameSchema("apellido").optional(),
+      email: emailSchema.optional(),
+      phone: phoneSchema.optional(),
       photoUrl: photoUrlSchema,
       role: roleSchema.optional(),
       isActive: z

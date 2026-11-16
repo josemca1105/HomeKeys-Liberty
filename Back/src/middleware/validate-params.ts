@@ -23,6 +23,7 @@ export const validateParams = (schema: z.ZodType): RequestHandler => {
       return;
     }
 
+    req.validatedParams = validationResult.data;
     next();
   };
 };

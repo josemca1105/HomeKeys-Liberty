@@ -15,9 +15,10 @@ import type {
   UpdateUserInput,
 } from "../types/user";
 import type { AuditAction } from "../types/audit";
-import { AppError } from "../utils/app-error";
+import type { UserIdParams } from "../validators/user-validators";
 import { getAuditActor, getAuditRequestContext } from "../utils/audit-context";
 import { asyncHandler } from "../utils/async-handler";
+import { requireSession } from "../utils/require-session";
 
 export const addUser = asyncHandler(async (req, res): Promise<void> => {
   const userData = req.body as CreateUserInput;
@@ -45,16 +46,7 @@ export const addUser = asyncHandler(async (req, res): Promise<void> => {
 });
 
 export const getCurrentUser = asyncHandler(async (req, res): Promise<void> => {
-  const session = req.auth;
-
-  if (!session) {
-    throw new AppError({
-      statusCode: 401,
-      code: "AUTHENTICATION_REQUIRED",
-      message: "Debes iniciar sesión para acceder a este recurso.",
-    });
-  }
-
+  const session = requireSession(req);
   const user = await getUserProfile(session.userId);
 
   res.status(200).json({
@@ -76,7 +68,7 @@ export const getUsers = asyncHandler(async (req, res): Promise<void> => {
 });
 
 export const getUserById = asyncHandler(async (req, res): Promise<void> => {
-  const userId = Number(req.params.id);
+  const userId = (req.validatedParams as UserIdParams).id;
   const user = await getUserProfile(userId);
 
   res.status(200).json({
@@ -87,16 +79,7 @@ export const getUserById = asyncHandler(async (req, res): Promise<void> => {
 });
 
 export const changeMyPassword = asyncHandler(async (req, res): Promise<void> => {
-  const session = req.auth;
-
-  if (!session) {
-    throw new AppError({
-      statusCode: 401,
-      code: "AUTHENTICATION_REQUIRED",
-      message: "Debes iniciar sesión para acceder a este recurso.",
-    });
-  }
-
+  const session = requireSession(req);
   const input = req.body as ChangePasswordInput;
   const { user, token } = await changeOwnPassword(session.userId, input);
 
@@ -118,17 +101,8 @@ export const changeMyPassword = asyncHandler(async (req, res): Promise<void> => 
 });
 
 export const updateUser = asyncHandler(async (req, res): Promise<void> => {
-  const session = req.auth;
-
-  if (!session) {
-    throw new AppError({
-      statusCode: 401,
-      code: "AUTHENTICATION_REQUIRED",
-      message: "Debes iniciar sesión para acceder a este recurso.",
-    });
-  }
-
-  const userId = Number(req.params.id);
+  const session = requireSession(req);
+  const userId = (req.validatedParams as UserIdParams).id;
   const input = req.body as UpdateUserInput;
   const { user, token, previousEmail } = await updateUserByAdmin(
     userId,
@@ -170,17 +144,8 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
 });
 
 export const removeUser = asyncHandler(async (req, res): Promise<void> => {
-  const session = req.auth;
-
-  if (!session) {
-    throw new AppError({
-      statusCode: 401,
-      code: "AUTHENTICATION_REQUIRED",
-      message: "Debes iniciar sesión para acceder a este recurso.",
-    });
-  }
-
-  const userId = Number(req.params.id);
+  const session = requireSession(req);
+  const userId = (req.validatedParams as UserIdParams).id;
   const deletedId = await deleteUserByAdmin(userId, session.userId);
 
   await recordAuditEvent({

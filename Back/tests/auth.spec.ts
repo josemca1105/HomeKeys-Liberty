@@ -265,4 +265,35 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
     assert.equal(response.status, 413);
     assert.equal(response.body.code, "PAYLOAD_TOO_LARGE");
   });
+
+  it("rejects unknown fields on login and forgot-password", async () => {
+    const loginResponse = await request(app)
+      .post("/api/v1/auth/login")
+      .send({
+        email: "strict-check@example.com",
+        password: "Wrong-Password1!",
+        role: "ADMIN",
+      });
+
+    assert.equal(loginResponse.status, 400);
+    assert.equal(loginResponse.body.code, "VALIDATION_ERROR");
+    assert.equal(
+      loginResponse.body.errors.some(
+        (error: { message: string }) =>
+          error.message ===
+          "No se permiten campos desconocidos en la petición.",
+      ),
+      true,
+    );
+
+    const forgotResponse = await request(app)
+      .post("/api/v1/auth/forgot-password")
+      .send({
+        email: "partner@example.com",
+        redirect: "https://attacker.example.com",
+      });
+
+    assert.equal(forgotResponse.status, 400);
+    assert.equal(forgotResponse.body.code, "VALIDATION_ERROR");
+  });
 });

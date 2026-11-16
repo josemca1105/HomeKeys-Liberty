@@ -247,6 +247,8 @@ Request:
 
 A successful response returns a JWT and safe user information. Password hashes are never exposed.
 
+The body is strict: unknown fields (for example `role` or `token`) are rejected with `400 VALIDATION_ERROR`.
+
 Possible responses:
 
 - `200`: authenticated successfully.
@@ -361,6 +363,8 @@ Example with the default PARTNER role and no explicit password:
 ```
 
 The `password` field is optional and is never disclosed. When it is omitted, the API generates a random initial password internally; when it is sent explicitly, it must satisfy the password policy and only the ADMIN knows it (it is never emailed).
+
+The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR` instead of being silently ignored.
 
 The optional `photoUrl` must be an absolute `http` or `https` URL without embedded credentials. `javascript:`, `data:`, `ftp:` and literal localhost, private, link-local or internal hosts are rejected.
 
@@ -559,7 +563,7 @@ The log is append-only: there is no API to update or delete audit rows. Cleanup 
 POST /api/v1/auth/forgot-password
 ```
 
-Public endpoint. Body:
+Public endpoint. The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR`. Body:
 
 ```json
 {

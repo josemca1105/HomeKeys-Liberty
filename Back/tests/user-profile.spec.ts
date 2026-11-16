@@ -618,6 +618,37 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.notEqual(partner.passwordHash, TEST_CHANGED_PASSWORD);
   });
 
+  it("rejects unknown fields when creating a user", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const response = await request(app)
+      .post("/api/v1/users/add")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        firstName: "Test",
+        lastName: "Strict",
+        email: "strict-user@example.com",
+        phone: "00000000",
+        photoUrl: null,
+        isAdmin: true,
+      });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.code, "VALIDATION_ERROR");
+    assert.equal(
+      response.body.errors.some(
+        (error: { message: string }) =>
+          error.message ===
+          "No se permiten campos desconocidos en la petición.",
+      ),
+      true,
+    );
+    assert.equal(
+      database.users.some((user) => user.email === "strict-user@example.com"),
+      false,
+    );
+  });
+
   it("rejects a duplicate email during user update", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 

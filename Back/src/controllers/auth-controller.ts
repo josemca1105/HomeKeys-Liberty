@@ -14,6 +14,7 @@ import type {
 import { AppError } from "../utils/app-error";
 import { getAuditActor, getAuditRequestContext } from "../utils/audit-context";
 import { asyncHandler } from "../utils/async-handler";
+import { requireSession } from "../utils/require-session";
 
 export const login = asyncHandler(async (req, res): Promise<void> => {
   const credentials = req.body as LoginInput;
@@ -55,22 +56,16 @@ export const login = asyncHandler(async (req, res): Promise<void> => {
 });
 
 export const logout = asyncHandler(async (req, res): Promise<void> => {
-  if (!req.auth) {
-    throw new AppError({
-      statusCode: 401,
-      code: "AUTHENTICATION_REQUIRED",
-      message: "Debes iniciar sesión para acceder a este recurso.",
-    });
-  }
+  const session = requireSession(req);
 
-  await revokeCurrentToken(req.auth);
+  await revokeCurrentToken(session);
 
   await recordAuditEvent({
     scope: AuditScope.SECURITY,
     action: "LOGOUT",
-    actor: getAuditActor(req.auth),
+    actor: getAuditActor(session),
     entityType: "USER",
-    entityId: req.auth.userId,
+    entityId: session.userId,
     request: getAuditRequestContext(req),
   });
 
