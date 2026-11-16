@@ -5,6 +5,7 @@ import type { Transporter } from "nodemailer";
 import { environment } from "../config/env";
 import {
   EMAIL_LOGO_CID,
+  renderEmailChangeNoticeEmail,
   renderInvitationEmail,
   renderPasswordResetEmail,
   renderPasswordResetNoticeEmail,
@@ -102,6 +103,12 @@ export interface PasswordResetNoticeEmailData {
   loginUrl: string;
 }
 
+export interface EmailChangeNoticeEmailData {
+  to: string;
+  firstName: string;
+  loginUrl: string;
+}
+
 const sendBrandedEmail = async (
   to: string,
   rendered: { subject: string; html: string; text: string },
@@ -167,5 +174,16 @@ export const sendPasswordResetNoticeEmail = async ({
   await sendBrandedEmail(
     to,
     renderPasswordResetNoticeEmail({ firstName, loginUrl }),
+  );
+};
+
+export const sendEmailChangeNoticeEmail = async ({
+  to,
+  firstName,
+  loginUrl,
+}: EmailChangeNoticeEmailData): Promise<void> => {
+  await sendBrandedEmail(
+    to,
+    renderEmailChangeNoticeEmail({ firstName, loginUrl }),
   );
 };

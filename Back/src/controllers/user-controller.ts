@@ -130,7 +130,7 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
 
   const userId = Number(req.params.id);
   const input = req.body as UpdateUserInput;
-  const { user, token } = await updateUserByAdmin(
+  const { user, token, previousEmail } = await updateUserByAdmin(
     userId,
     input,
     session.userId,
@@ -157,6 +157,7 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
       email: user.email,
       role: user.role,
       isActive: user.isActive,
+      ...(previousEmail !== null ? { previousEmail } : {}),
     },
     request: getAuditRequestContext(req),
   });

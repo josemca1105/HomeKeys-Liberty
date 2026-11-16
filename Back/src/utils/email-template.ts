@@ -248,3 +248,32 @@ export const renderPasswordResetNoticeEmail = (
 
   return { subject, ...rendered };
 };
+
+export interface EmailChangeNoticeEmailContent {
+  firstName: string;
+  loginUrl: string;
+}
+
+export const renderEmailChangeNoticeEmail = (
+  content: EmailChangeNoticeEmailContent,
+): RenderedEmail & { subject: string } => {
+  const subject = "Tu correo de acceso cambió - HomeKeys Liberty";
+  const rendered = renderEmailLayout({
+    heading: "Tu correo de acceso cambió",
+    greeting: `Hola ${content.firstName},`,
+    paragraphs: [
+      "El correo asociado a tu cuenta de HomeKeys Liberty fue actualizado por un administrador.",
+      "A partir de ahora, inicia sesión con tu nuevo correo electrónico. Si no reconoces este cambio, contacta de inmediato a un administrador.",
+    ],
+    action: {
+      label: "Ir a HomeKeys Liberty",
+      url: content.loginUrl,
+      fallbackLabel:
+        "Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:",
+    },
+    notice:
+      "Por seguridad, no incluimos la nueva dirección de correo en este mensaje.",
+  });
+
+  return { subject, ...rendered };
+};

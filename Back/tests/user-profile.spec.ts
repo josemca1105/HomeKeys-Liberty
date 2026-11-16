@@ -283,6 +283,95 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(detailResponse.status, 200);
     assert.equal(detailResponse.body.data.user.email, "nuevo@example.com");
     assert.equal(detailResponse.body.data.user.role, Role.ADMIN);
+
+    // The previous address is notified, and the message never reveals the new
+    // address (the old mailbox could be compromised).
+    assert.equal(outbox.length, 1);
+    const notice = outbox[0];
+    assert.ok(notice);
+    assert.equal(notice.to, "partner@example.com");
+    assert.equal(
+      notice.subject,
+      "Tu correo de acceso cambió - HomeKeys Liberty",
+    );
+    assert.equal(
+      notice.text.includes("fue actualizado por un administrador"),
+      true,
+    );
+    assert.equal(notice.text.includes("nuevo@example.com"), false);
+    assert.equal(notice.html.includes("nuevo@example.com"), false);
+
+    const auditEntry = database.auditLogs.find(
+      (log) => log.action === "USER_UPDATED",
+    );
+    assert.ok(auditEntry);
+    assert.equal(
+      JSON.stringify(auditEntry.changes).includes("partner@example.com"),
+      true,
+    );
+  });
+
+  it("does not send the email notice when the address does not change", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ phone: "04120000001" });
+
+    assert.equal(response.status, 200);
+    assert.equal(outbox.length, 0);
+  });
+
+  it("does not fail the update when the email notice cannot be delivered", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    setMailSenderForTesting({
+      sendMail: async (): Promise<unknown> => {
+        throw new Error("SMTP unavailable");
+      },
+    });
+
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: "moved@example.com" });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.data.user.email, "moved@example.com");
+  });
+
+  it("notifies both addresses when the email and the password change together", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        email: "new-partner@example.com",
+        password: TEST_CHANGED_PASSWORD,
+      });
+
+    assert.equal(response.status, 200);
+    assert.equal(outbox.length, 2);
+
+    const passwordNotice = outbox.find(
+      (mail) => mail.to === "new-partner@example.com",
+    );
+    const emailNotice = outbox.find(
+      (mail) => mail.to === "partner@example.com",
+    );
+
+    assert.ok(passwordNotice);
+    assert.ok(emailNotice);
+    assert.equal(
+      passwordNotice.subject,
+      "Tu contraseña fue restablecida - HomeKeys Liberty",
+    );
+    assert.equal(
+      emailNotice.subject,
+      "Tu correo de acceso cambió - HomeKeys Liberty",
+    );
   });
 
   it("allows ADMIN to reset another user's password and closes that user's sessions", async () => {

@@ -34,6 +34,7 @@ export interface ChangePasswordInput {
 export interface UserUpdateResult {
   user: UserResponse;
   token: string | null;
+  previousEmail: string | null;
 }
 
 export interface PasswordChangeResult {

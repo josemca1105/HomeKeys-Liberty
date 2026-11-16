@@ -33,6 +33,7 @@ import type {
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
 import {
+  sendEmailChangeNoticeEmail,
   sendInvitationEmail,
   sendPasswordResetNoticeEmail,
 } from "../utils/mailer";
@@ -322,6 +323,9 @@ export const updateUserByAdmin = async (
   const newEmail = input.email;
   const isEmailChangingFromSnapshot =
     newEmail !== undefined && newEmail !== currentTarget.email;
+  const previousEmail = isEmailChangingFromSnapshot
+    ? currentTarget.email
+    : null;
 
   if (isEmailChangingFromSnapshot) {
     const existingUser = await findUserByEmail(newEmail);
@@ -444,11 +448,26 @@ export const updateUserByAdmin = async (
       }
     }
 
+    if (previousEmail !== null) {
+      // The notice goes to the previous address so its owner can react if the
+      // change was not expected. It deliberately omits the new address.
+      try {
+        await sendEmailChangeNoticeEmail({
+          to: previousEmail,
+          firstName: updatedUser.firstName,
+          loginUrl: environment.APP_BASE_URL,
+        });
+      } catch (error) {
+        console.error("Failed to send the email change notice email.", error);
+      }
+    }
+
     return {
       user: toUserResponse(updatedUser),
       token: isOwnPasswordChange
         ? generateAuthToken(updatedUser.id, updatedUser.role)
         : null,
+      previousEmail,
     };
   } catch (error) {
     if (
