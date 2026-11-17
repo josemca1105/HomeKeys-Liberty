@@ -286,6 +286,7 @@ export interface MockDatabase {
   setEmptyUserList: () => void;
   failNextUserCreateWithDuplicateEmail: () => void;
   failNextAuditLogCreate: () => void;
+  failNextDatabaseCheck: () => void;
   addUser: (userData: {
     id: number;
     email: string;
@@ -361,6 +362,7 @@ export const createMockDatabase = (): MockDatabase => {
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
   let shouldFailNextAuditLogCreate = false;
+  let shouldFailNextDatabaseCheck = false;
   let userCreateCallCount = 0;
   let userFindManyCallCount = 0;
   let shouldReturnEmptyUserList = false;
@@ -1030,6 +1032,21 @@ export const createMockDatabase = (): MockDatabase => {
     return serializedRun;
   };
 
+  // The readiness probe runs a real `SELECT 1` against PostgreSQL; tests must
+  // never connect, so the mock satisfies it locally and can force a failure.
+  const prismaWithRawCheck = prisma as unknown as {
+    $queryRaw: (...args: unknown[]) => Promise<unknown>;
+  };
+
+  prismaWithRawCheck.$queryRaw = async (): Promise<unknown> => {
+    if (shouldFailNextDatabaseCheck) {
+      shouldFailNextDatabaseCheck = false;
+      throw new Error("Database unavailable");
+    }
+
+    return [{ "?column?": 1 }];
+  };
+
   return {
     users,
     revokedTokens,
@@ -1046,6 +1063,9 @@ export const createMockDatabase = (): MockDatabase => {
     },
     failNextAuditLogCreate: (): void => {
       shouldFailNextAuditLogCreate = true;
+    },
+    failNextDatabaseCheck: (): void => {
+      shouldFailNextDatabaseCheck = true;
     },
     addUser: ({
       id,

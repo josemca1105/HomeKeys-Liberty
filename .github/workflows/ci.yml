@@ -1,0 +1,66 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Back/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "Back/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Typecheck, tests, build and audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Back
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/homekeys_liberty?schema=public
+      # CI-only value: 64 characters with 16 distinct characters. It never
+      # protects real data; production uses its own secret.
+      JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CORS_ORIGINS: http://localhost:5173
+      LOG_LEVEL: silent
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Back/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev

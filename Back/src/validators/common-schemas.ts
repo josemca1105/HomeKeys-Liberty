@@ -20,7 +20,18 @@ export const phoneSchema = createRequiredStringSchema(
 )
   .trim()
   .min(1, "El teléfono es obligatorio.")
-  .max(20, "El teléfono no puede tener más de 20 caracteres.");
+  .max(20, "El teléfono no puede tener más de 20 caracteres.")
+  .refine((value) => /^\+?[\d\s().-]+$/u.test(value), {
+    message:
+      "El teléfono solo puede contener números, espacios, paréntesis, guiones, puntos y un prefijo +.",
+  })
+  .refine(
+    (value) => {
+      const digits = value.replace(/\D/g, "");
+      return digits.length >= 6 && digits.length <= 15;
+    },
+    { message: "El teléfono debe tener entre 6 y 15 dígitos." },
+  );
 
 export const createPersonNameSchema = (fieldLabel: string): z.ZodString => {
   return createRequiredStringSchema(
@@ -29,5 +40,11 @@ export const createPersonNameSchema = (fieldLabel: string): z.ZodString => {
   )
     .trim()
     .min(1, `El ${fieldLabel} es obligatorio.`)
-    .max(100, `El ${fieldLabel} no puede tener más de 100 caracteres.`);
+    .max(100, `El ${fieldLabel} no puede tener más de 100 caracteres.`)
+    .refine((value) => !/\p{Cc}/u.test(value), {
+      message: `El ${fieldLabel} no puede contener caracteres de control.`,
+    })
+    .refine((value) => /\p{L}/u.test(value), {
+      message: `El ${fieldLabel} debe contener al menos una letra.`,
+    });
 };

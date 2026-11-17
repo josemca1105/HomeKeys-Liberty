@@ -10,6 +10,7 @@ import { notFoundHandler } from "./middleware/not-found-handler";
 import { noStore } from "./middleware/no-store";
 import { apiRateLimiter } from "./middleware/rate-limiters";
 import { requestContext } from "./middleware/request-context";
+import { healthRoutes } from "./routes/health-routes";
 import { apiRoutes } from "./routes";
 
 const createCorsOptions = (): CorsOptions => {
@@ -54,6 +55,11 @@ export const createApp = (): Express => {
   // a Referer header, even to a future same-origin page.
   app.use(helmet({ referrerPolicy: { policy: "no-referrer" } }));
   app.use(cors(createCorsOptions()));
+
+  // Probes are mounted before the global limiter so orchestration checks are
+  // never throttled and cannot exhaust the API budget.
+  app.use(healthRoutes);
+
   app.use(apiRateLimiter);
   app.use(express.json({ limit: "10kb" }));
 
