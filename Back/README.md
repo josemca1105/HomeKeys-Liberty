@@ -205,7 +205,7 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 The current physical database schema is entirely in English:
 
 - Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `login_attempts`, and `audit_logs`.
-- User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`.
+- User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`. The `email` column uses PostgreSQL `citext`, so case-insensitive duplicates are rejected by the database itself, not only by the API validators.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
 - Property categories: `House`, `Apartment`, and `Commercial`.
@@ -750,6 +750,7 @@ There are also live checks against a real PostgreSQL database using temporary us
 npx tsx tests/live/user-management-live.ts
 npx tsx tests/live/password-reset-live.ts
 npx tsx tests/live/invitation-live.ts
+npx tsx tests/live/email-case-live.ts
 ```
 
 The password recovery and invitation live checks additionally deliver real branded emails through the Gmail SMTP account configured in `.env` (the invitation check uses plus-addressed mailboxes so everything arrives at the same inbox for visual review).
@@ -800,6 +801,7 @@ prisma/migrations/20261111000000_add_relations_and_indexes/
 prisma/migrations/20261111120000_add_audit_logs/
 prisma/migrations/20261112130000_add_login_lockout/
 prisma/migrations/20261112140000_add_user_is_active/
+prisma/migrations/20261116120000_use_citext_email/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -813,6 +815,8 @@ The fourth one creates the append-only `audit_logs` table, its scope enum and it
 The fifth one creates the `login_attempts` table behind the persistent account lockout. It is keyed by the submitted email, with no foreign key to `users`, so unknown emails are tracked identically and the lock cannot reveal which accounts exist.
 
 The sixth one adds `users.is_active` for account deactivation. Deactivated accounts keep every relation and audit row, but login and existing sessions are blocked with `403 ACCOUNT_INACTIVE`; reactivation invalidates the sessions issued before the deactivation.
+
+The seventh one converts `users.email` to PostgreSQL `citext` (enabling the extension), so the unique index rejects case-variant duplicates even when rows are written outside the API. The API keeps normalizing emails to lowercase, and the live check `tests/live/email-case-live.ts` verifies the database behavior.
 
 Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
