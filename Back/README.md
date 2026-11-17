@@ -45,7 +45,9 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - 24-month audit retention (configurable with `AUDIT_RETENTION_MONTHS`).
 - Hourly cleanup of expired revoked tokens, stale login attempts and expired audit rows.
 - Public `/health` (liveness) and `/ready` (database readiness) endpoints for orchestration.
-- GitHub Actions CI for typecheck, tests, build, Prisma validation and dependency audit.
+- OpenAPI 3.1 contract validated by the test suite.
+- `npm run verify` plus a versioned pre-push hook; optional manual GitHub workflow.
+- Live Redis rate-limit check for shared counters and fail-open behavior.
 - Centralized validation and error handling, including 413 payload responses.
 - Automated HTTP integration tests with isolated Prisma test doubles.
 - Helmet security headers.
@@ -783,11 +785,20 @@ npx tsx tests/live/password-reset-live.ts
 npx tsx tests/live/invitation-live.ts
 npx tsx tests/live/email-case-live.ts
 npx tsx tests/live/audit-transaction-live.ts
+npx tsx tests/live/redis-rate-limit-live.ts
 ```
+
+The Redis check needs a reachable server (`RATE_LIMIT_REDIS_URL`, default `redis://localhost:6379`). Start one with `docker run --rm -p 6379:6379 redis:7` before running it.
 
 The password recovery and invitation live checks additionally deliver real branded emails through the Gmail SMTP account configured in `.env` (the invitation check uses plus-addressed mailboxes so everything arrives at the same inbox for visual review).
 
 ## Verification commands
+
+```powershell
+npm run verify
+```
+
+`npm run verify` runs the typecheck, the full test suite, the build, `prisma validate` and `npm audit --omit=dev`. The individual commands are:
 
 ```powershell
 npm run typecheck
@@ -798,9 +809,29 @@ npx prisma migrate status
 npm audit
 ```
 
-## Continuous integration
+## OpenAPI contract
 
-`.github/workflows/ci.yml` runs on every push to `main` and on pull requests that touch `Back/`. It installs dependencies with `npm ci`, generates and validates the Prisma client, runs the typecheck, the full test suite, the build and `npm audit --omit=dev`. The tests use Prisma test doubles, so no PostgreSQL service is required in CI. Production dependencies with known vulnerabilities fail the workflow.
+`openapi.yaml` describes the HTTP contract (paths, request and response schemas, authentication and errors) using the OpenAPI 3.1 standard. OpenAPI is an open specification maintained by the OpenAPI Initiative (Linux Foundation): it is not related to OpenAI, and it requires no account, service, payment or internet access. The file lives in the repository and can be consumed by Postman, SDK generators, mock servers and documentation tools.
+
+`tests/openapi.spec.ts` parses the file with the `yaml` dev dependency and fails the suite if the document version, the bearer security scheme, the documented paths or any internal `$ref` is missing or broken.
+
+## Continuous integration and the pre-push hook
+
+GitHub Actions is optional in this repository, so the workflow has no automatic triggers. The dependency-free gate is local and runs the same checks:
+
+```powershell
+npm run verify
+```
+
+To block pushes that fail those checks, activate the versioned hook once per clone:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+The hook runs `npm run verify` before every push. Use `git push --no-verify` only when you deliberately want to skip it.
+
+`.github/workflows/ci.yml` remains available as a manual (`workflow_dispatch`) workflow for environments where GitHub Actions is enabled. It contains the same backend checks plus an optional job with a `redis:7` service container that runs `tests/live/redis-rate-limit-live.ts`.
 
 ## Troubleshooting Prisma types
 

@@ -1,0 +1,988 @@
+openapi: 3.1.0
+info:
+  title: HomeKeys Liberty API
+  version: 1.0.0
+  description: |
+    REST API for the HomeKeys Liberty real-estate platform.
+
+    ## Authentication
+    Protected endpoints require a Bearer JWT issued by `POST /api/v1/auth/login`.
+    Tokens expire after one hour. Changing the password, resetting it, or
+    deactivating the account invalidates previously issued tokens.
+
+    ## Error format
+    Every error uses the same JSON shape: `success: false`, a stable `code`, a
+    Spanish user-facing `message`, and an optional `errors` array with field-level
+    details for validation failures.
+
+    ## Language
+    Source identifiers are in English. User-facing messages are in Spanish.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Login, logout and password recovery.
+  - name: Users
+    description: User management. ADMIN-only except the current-user endpoints.
+  - name: Audit
+    description: Append-only security and business history.
+  - name: Health
+    description: Public liveness and readiness probes.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Returns 200 when the process is running. It does not touch the database.
+      security: []
+      responses:
+        "200":
+          description: API is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Runs `SELECT 1` against PostgreSQL. Public and not rate limited.
+      security: []
+      responses:
+        "200":
+          description: API and database are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Start a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated. Returns a JWT and the safe user profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Correct password, but the account is deactivated (`ACCOUNT_INACTIVE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Email temporarily locked (`ACCOUNT_LOCKED`) or rate limit exceeded (`TOO_MANY_LOGIN_ATTEMPTS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Close the current session
+      description: Idempotent. A repeated or concurrent logout still returns 200.
+      responses:
+        "200":
+          description: Session closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageOnlyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password recovery link
+      description: |
+        Always returns the same generic response, whether the email exists or
+        not. Token issuance and SMTP delivery run in the background.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Request accepted. The response is intentionally generic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyDataResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_RESET_ATTEMPTS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset a password with a single-use token
+      description: |
+        Used by password recovery and by invitation activation. The token comes
+        from the email link fragment (`#token=...`). Two concurrent requests
+        cannot both consume the same token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset. Every previous session is closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyDataResponse"
+        "400":
+          description: |
+            Invalid body (`VALIDATION_ERROR`), unknown token
+            (`INVALID_RESET_TOKEN`), expired token (`RESET_TOKEN_EXPIRED`) or
+            already used token (`RESET_TOKEN_ALREADY_USED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_RESET_ATTEMPTS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/add:
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: |
+        ADMIN only. The optional password is never disclosed. When omitted, the
+        API generates an internal password and the user activates the account
+        through the invitation link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The email already belongs to another user (`EMAIL_ALREADY_REGISTERED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_ADMIN_ACTIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List users
+      description: ADMIN only. Paginated, searchable, filterable and sortable.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/UserSearch"
+        - $ref: "#/components/parameters/UserRoleFilter"
+        - $ref: "#/components/parameters/UserActiveFilter"
+        - $ref: "#/components/parameters/UserSortBy"
+        - $ref: "#/components/parameters/UserSortOrder"
+      responses:
+        "200":
+          description: User page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get the current user
+      responses:
+        "200":
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/users/me/password:
+    patch:
+      tags: [Users]
+      summary: Change my password
+      description: |
+        Invalidates every previously issued session and returns a fresh token
+        for the caller. A wrong current password returns 422 and keeps the
+        session valid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed. Use `data.token` for the current session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangePasswordResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: The current password is wrong (`INVALID_CURRENT_PASSWORD`). The session remains valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_PASSWORD_CHANGE_ATTEMPTS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      description: ADMIN only. PARTNER users must use `/users/me`.
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Users]
+      summary: Update a user
+      description: |
+        ADMIN only. Partial update; at least one field is required. Changing the
+        email invalidates pending links and notifies the previous address.
+        Deactivation blocks login and existing sessions; reactivation invalidates
+        sessions issued before the deactivation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            Duplicate email (`EMAIL_ALREADY_REGISTERED`), last active ADMIN
+            (`LAST_ADMIN_REQUIRED`) or self-deactivation
+            (`SELF_DEACTIVATION_NOT_ALLOWED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_ADMIN_ACTIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      description: |
+        ADMIN only. Physical deletion. Use `PATCH /users/{id}` with
+        `isActive: false` to keep the history. A user with properties cannot be
+        deleted.
+      responses:
+        "200":
+          description: User deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            Self-deletion (`SELF_DELETION_NOT_ALLOWED`), last active ADMIN
+            (`LAST_ADMIN_REQUIRED`) or user with properties
+            (`USER_HAS_PROPERTIES`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_ADMIN_ACTIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/audit-logs:
+    get:
+      tags: [Audit]
+      summary: List audit history
+      description: |
+        ADMIN sees every event. PARTNER sees only its own events; an `actorId`
+        sent by a PARTNER is ignored. The history is append-only and has no
+        edit or delete endpoints.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/AuditScopeFilter"
+        - $ref: "#/components/parameters/AuditActionFilter"
+        - $ref: "#/components/parameters/AuditActorFilter"
+        - $ref: "#/components/parameters/AuditEntityTypeFilter"
+        - $ref: "#/components/parameters/AuditEntityIdFilter"
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+      responses:
+        "200":
+          description: Audit log page, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: Numeric user ID.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+    Page:
+      name: page
+      in: query
+      description: Page number, starting at 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      description: Page size between 1 and 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    UserSearch:
+      name: search
+      in: query
+      description: Case-insensitive match on first name, last name, email or phone.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+    UserRoleFilter:
+      name: role
+      in: query
+      schema:
+        $ref: "#/components/schemas/Role"
+    UserActiveFilter:
+      name: isActive
+      in: query
+      description: Filter active or deactivated accounts.
+      schema:
+        type: string
+        enum: ["true", "false"]
+    UserSortBy:
+      name: sortBy
+      in: query
+      schema:
+        type: string
+        enum: [createdAt, firstName, lastName, email, role]
+        default: createdAt
+    UserSortOrder:
+      name: sortOrder
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+    AuditScopeFilter:
+      name: scope
+      in: query
+      schema:
+        $ref: "#/components/schemas/AuditScope"
+    AuditActionFilter:
+      name: action
+      in: query
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 80
+    AuditActorFilter:
+      name: actorId
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    AuditEntityTypeFilter:
+      name: entityType
+      in: query
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 40
+    AuditEntityIdFilter:
+      name: entityId
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    AuditFrom:
+      name: from
+      in: query
+      description: Inclusive lower bound for `createdAt`.
+      schema:
+        type: string
+        format: date-time
+    AuditTo:
+      name: to
+      in: query
+      description: Inclusive upper bound for `createdAt`.
+      schema:
+        type: string
+        format: date-time
+  responses:
+    BadRequest:
+      description: Invalid body, path or query (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: |
+        Missing, invalid, expired or revoked token (`INVALID_SESSION`,
+        `SESSION_REVOKED`, `SESSION_INVALIDATED`) or missing credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: |
+        Insufficient role (`ADMIN_REQUIRED`), mandatory password change
+        (`PASSWORD_CHANGE_REQUIRED`) or deactivated account (`ACCOUNT_INACTIVE`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: The requested resource does not exist (`USER_NOT_FOUND`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailable:
+      description: The API is not ready because the database is unreachable (`NOT_READY`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Role:
+      type: string
+      enum: [ADMIN, PARTNER]
+    AuditScope:
+      type: string
+      enum: [SECURITY, BUSINESS]
+    User:
+      type: object
+      required:
+        - id
+        - firstName
+        - lastName
+        - email
+        - phone
+        - photoUrl
+        - role
+        - isActive
+        - mustChangePassword
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        firstName:
+          type: string
+          maxLength: 100
+        lastName:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        phone:
+          type: string
+          maxLength: 20
+        photoUrl:
+          type: [string, "null"]
+          format: uri
+        role:
+          $ref: "#/components/schemas/Role"
+        isActive:
+          type: boolean
+        mustChangePassword:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [success, code, message]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+    Pagination:
+      type: object
+      required: [page, pageSize, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          minLength: 1
+          maxLength: 72
+    ForgotPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 128
+        newPassword:
+          type: string
+          minLength: 12
+          maxLength: 72
+          description: At least 12 characters with uppercase, lowercase, number and special character.
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [firstName, lastName, email, phone]
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+          description: Optional. Must satisfy the password policy and must not be based on the email or name.
+        phone:
+          type: string
+          minLength: 6
+          maxLength: 20
+          pattern: '^\+?[0-9\s().-]{6,20}$'
+        photoUrl:
+          type: [string, "null"]
+          format: uri
+        role:
+          $ref: "#/components/schemas/Role"
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        phone:
+          type: string
+          minLength: 6
+          maxLength: 20
+          pattern: '^\+?[0-9\s().-]{6,20}$'
+        photoUrl:
+          type: [string, "null"]
+          format: uri
+        role:
+          $ref: "#/components/schemas/Role"
+        isActive:
+          type: boolean
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 72
+        newPassword:
+          type: string
+          minLength: 12
+          maxLength: 72
+    AuditLog:
+      type: object
+      required:
+        - id
+        - scope
+        - action
+        - createdAt
+      properties:
+        id:
+          type: integer
+        scope:
+          $ref: "#/components/schemas/AuditScope"
+        actorId:
+          type: [integer, "null"]
+        actorRole:
+          oneOf:
+            - $ref: "#/components/schemas/Role"
+            - type: "null"
+        actorEmail:
+          type: [string, "null"]
+        action:
+          type: string
+          maxLength: 80
+        entityType:
+          type: [string, "null"]
+        entityId:
+          type: [integer, "null"]
+        changes:
+          type: [object, "null"]
+          additionalProperties: true
+        ip:
+          type: [string, "null"]
+        userAgent:
+          type: [string, "null"]
+        requestId:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+    SuccessBase:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        message:
+          type: string
+    MessageOnlyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+    EmptyDataResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              additionalProperties: false
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [token, user]
+              properties:
+                token:
+                  type: string
+                user:
+                  $ref: "#/components/schemas/User"
+    UserResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  $ref: "#/components/schemas/User"
+    CreatedUserResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [user, invitationSent]
+              properties:
+                user:
+                  $ref: "#/components/schemas/User"
+                invitationSent:
+                  type: boolean
+    UpdateUserResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  $ref: "#/components/schemas/User"
+                token:
+                  type: string
+                  description: Present only when an ADMIN resets its own password.
+    ChangePasswordResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [user, token]
+              properties:
+                user:
+                  $ref: "#/components/schemas/User"
+                token:
+                  type: string
+    DeleteUserResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [deletedId]
+              properties:
+                deletedId:
+                  type: integer
+    UserListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [users, pagination]
+              properties:
+                users:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/User"
+                pagination:
+                  $ref: "#/components/schemas/Pagination"
+    AuditLogListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [logs, pagination]
+              properties:
+                logs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/AuditLog"
+                pagination:
+                  $ref: "#/components/schemas/Pagination"
+    HealthResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [status, uptimeSeconds]
+              properties:
+                status:
+                  type: string
+                  enum: [ok]
+                uptimeSeconds:
+                  type: integer
+                  minimum: 0
+    ReadyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ready]

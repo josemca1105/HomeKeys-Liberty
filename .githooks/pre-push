@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs the same checks as the manual GitHub workflow before every push.
+# Activate once with: git config core.hooksPath .githooks
+# Skip with: git push --no-verify
+set -e
+
+repository_root="$(git rev-parse --show-toplevel)"
+cd "$repository_root/Back"
+
+echo "Running npm run verify before push..."
+npm run verify
