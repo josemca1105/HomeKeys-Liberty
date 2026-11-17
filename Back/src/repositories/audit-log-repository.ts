@@ -21,10 +21,13 @@ export interface FindAuditLogsPageOptions {
   take?: number;
 }
 
+type AuditLogClient = Prisma.TransactionClient | typeof prisma;
+
 export const createAuditLog = async (
   data: CreateAuditLogData,
+  client: AuditLogClient = prisma,
 ): Promise<AuditLog> => {
-  return prisma.auditLog.create({ data });
+  return client.auditLog.create({ data });
 };
 
 export const findAuditLogsPage = async ({

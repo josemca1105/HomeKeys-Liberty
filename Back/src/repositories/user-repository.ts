@@ -146,8 +146,9 @@ export const findUserById = async (
 
 export const createUserRecord = async (
   userData: CreateUserData,
+  client: UserRepositoryClient = prisma,
 ): Promise<User> => {
-  return prisma.user.create({
+  return client.user.create({
     data: userData,
   });
 };

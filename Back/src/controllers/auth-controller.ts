@@ -98,14 +98,7 @@ export const forgotPassword = asyncHandler(async (req, res): Promise<void> => {
 export const resetPassword = asyncHandler(async (req, res): Promise<void> => {
   const { token, newPassword } = req.body as ResetPasswordInput;
 
-  const userId = await resetUserPassword(token, newPassword);
-
-  await recordAuditEvent({
-    scope: AuditScope.SECURITY,
-    action: "PASSWORD_RESET",
-    actor: { id: userId },
-    entityType: "USER",
-    entityId: userId,
+  await resetUserPassword(token, newPassword, {
     request: getAuditRequestContext(req),
   });
 

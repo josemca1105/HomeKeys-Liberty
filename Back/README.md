@@ -751,6 +751,7 @@ npx tsx tests/live/user-management-live.ts
 npx tsx tests/live/password-reset-live.ts
 npx tsx tests/live/invitation-live.ts
 npx tsx tests/live/email-case-live.ts
+npx tsx tests/live/audit-transaction-live.ts
 ```
 
 The password recovery and invitation live checks additionally deliver real branded emails through the Gmail SMTP account configured in `.env` (the invitation check uses plus-addressed mailboxes so everything arrives at the same inbox for visual review).
@@ -834,7 +835,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Protected routes verify the account and current role in PostgreSQL instead of trusting only JWT claims.
 - Login attempts are rate limited per account and per IP; password changes, administrator mutations, forgot-password and reset-password have dedicated limits; a global API limit covers the remaining routes. Browser origins are restricted by `CORS_ORIGINS`, and `TRUST_PROXY` controls how client IPs are derived behind a reverse proxy. Set `RATE_LIMIT_REDIS_URL` to share the counters across multiple instances.
 - Five consecutive failed logins lock the submitted email for 15 minutes in the `login_attempts` table. Because the row is keyed by email, not by user, unknown emails are locked identically and the lock response cannot be used to discover registered accounts. The lock survives restarts and multiple instances; stale rows are removed after 24 hours. A successful login clears the counter.
-- Authentication events, password changes/resets and user-management mutations are written to `audit_logs` with actor snapshots, IP, user-agent and request ID. The log is append-only, never stores passwords or tokens, and survives user deletion. Audit writes are best-effort: a failed audit insert is logged but does not roll back the business operation.
+- Authentication events, password changes/resets and user-management mutations are written to `audit_logs` with actor snapshots, IP, user-agent and request ID. The log is append-only, never stores passwords or tokens, and survives user deletion. Critical mutations (user creation, updates, deactivation, deletion, own-password change and password resets) write the audit row inside the same database transaction: if the audit insert fails, the mutation rolls back. Login, logout and recovery requests have no business transaction and stay best-effort.
 - Audit history is retained for 24 months by default (`AUDIT_RETENTION_MONTHS`, minimum 12, maximum 120) and purged automatically by the hourly maintenance job. ADMINs see the full history; PARTNERs only see their own events.
 - HTTP requests are logged with pino using a generated `X-Request-Id`; authorization, cookies and password/token fields are redacted.
 - New passwords are limited to 72 UTF-8 bytes to prevent silent bcrypt truncation.

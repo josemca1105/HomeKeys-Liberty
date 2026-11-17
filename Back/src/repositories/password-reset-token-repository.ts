@@ -1,5 +1,7 @@
 import type { PasswordResetToken } from "@prisma/client";
 import { prisma } from "../config/database";
+import { createAuditLog } from "./audit-log-repository";
+import type { CreateAuditLogData } from "./audit-log-repository";
 
 export type PasswordResetTokenRecord = Pick<
   PasswordResetToken,
@@ -45,6 +47,7 @@ export interface ApplyPasswordResetData {
   passwordHash: string;
   passwordChangedAt: Date;
   now: Date;
+  auditLog?: CreateAuditLogData;
 }
 
 // The token is consumed with a conditional update inside the transaction so
@@ -55,6 +58,7 @@ export const applyPasswordReset = async ({
   passwordHash,
   passwordChangedAt,
   now,
+  auditLog,
 }: ApplyPasswordResetData): Promise<boolean> => {
   return prisma.$transaction(async (transaction) => {
     const consumedToken = await transaction.passwordResetToken.updateMany({
@@ -85,6 +89,12 @@ export const applyPasswordReset = async ({
         mustChangePassword: false,
       },
     });
+
+    // The audit row shares the transaction: if it fails, the token stays
+    // unused and the password is not changed.
+    if (auditLog !== undefined) {
+      await createAuditLog(auditLog, transaction);
+    }
 
     return true;
   });

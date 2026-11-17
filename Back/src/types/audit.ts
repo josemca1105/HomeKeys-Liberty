@@ -37,6 +37,14 @@ export interface AuditEventInput {
   request: AuditRequestContext;
 }
 
+// Actor and request data captured by the controller and handed to a service so
+// the audit row can be written inside the same database transaction as the
+// mutation it describes.
+export interface AuditContext {
+  actor?: AuditActor;
+  request: AuditRequestContext;
+}
+
 export interface AuditLogQuery {
   page: number;
   pageSize: number;

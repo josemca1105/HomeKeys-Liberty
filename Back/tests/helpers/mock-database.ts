@@ -248,6 +248,7 @@ interface TransactionClientMock {
   revokedToken: RevokedTokenDelegateMock;
   passwordResetToken: PasswordResetTokenDelegateMock;
   loginAttempt: LoginAttemptDelegateMock;
+  auditLog: AuditLogDelegateMock;
 }
 
 interface LoginAttemptDelegateMock {
@@ -284,6 +285,7 @@ export interface MockDatabase {
   getUserFindManyCallCount: () => number;
   setEmptyUserList: () => void;
   failNextUserCreateWithDuplicateEmail: () => void;
+  failNextAuditLogCreate: () => void;
   addUser: (userData: {
     id: number;
     email: string;
@@ -358,6 +360,7 @@ export const createMockDatabase = (): MockDatabase => {
   const auditLogs: AuditLog[] = [];
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
+  let shouldFailNextAuditLogCreate = false;
   let userCreateCallCount = 0;
   let userFindManyCallCount = 0;
   let shouldReturnEmptyUserList = false;
@@ -914,6 +917,11 @@ export const createMockDatabase = (): MockDatabase => {
   auditLogDelegate.create = async (
     args: CreateAuditLogArgs,
   ): Promise<AuditLog> => {
+    if (shouldFailNextAuditLogCreate) {
+      shouldFailNextAuditLogCreate = false;
+      throw new Error("Audit storage unavailable");
+    }
+
     const nextId =
       auditLogs.length > 0
         ? Math.max(...auditLogs.map((log) => log.id)) + 1
@@ -988,6 +996,7 @@ export const createMockDatabase = (): MockDatabase => {
     revokedToken: revokedTokenDelegate,
     passwordResetToken: passwordResetTokenDelegate,
     loginAttempt: loginAttemptDelegate,
+    auditLog: auditLogDelegate,
   };
 
   let serializableTransactionQueue: Promise<unknown> = Promise.resolve();
@@ -1034,6 +1043,9 @@ export const createMockDatabase = (): MockDatabase => {
     },
     failNextUserCreateWithDuplicateEmail: (): void => {
       shouldFailNextUserCreate = true;
+    },
+    failNextAuditLogCreate: (): void => {
+      shouldFailNextAuditLogCreate = true;
     },
     addUser: ({
       id,

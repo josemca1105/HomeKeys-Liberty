@@ -203,6 +203,20 @@ describe("Audit log HTTP integration", { concurrency: false }, () => {
     }
   });
 
+  it("fails a critical mutation when the audit insert fails", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+
+    database.failNextAuditLogCreate();
+
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ firstName: "AuditFailure" });
+
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, "INTERNAL_SERVER_ERROR");
+  });
+
   it("removes audit logs older than the retention window", async () => {
     const oldDate = new Date();
     oldDate.setMonth(oldDate.getMonth() - 25);

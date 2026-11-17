@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { AuditScope } from "@prisma/client";
 import { environment } from "../config/env";
 import {
   applyPasswordReset,
@@ -7,11 +8,13 @@ import {
   findPasswordResetTokenByHash,
 } from "../repositories/password-reset-token-repository";
 import { findUserByEmail, findUserById } from "../repositories/user-repository";
+import type { AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { sendPasswordResetEmail } from "../utils/mailer";
 import { hashPassword } from "../utils/password";
 import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
 import { hashToken } from "../utils/token";
+import { buildAuditLogData } from "./audit-service";
 
 export const PASSWORD_RESET_TOKEN_TTL_MINUTES = 15;
 export const INVITATION_TOKEN_TTL_MINUTES = 24 * 60;
@@ -134,6 +137,7 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
 export const resetUserPassword = async (
   token: string,
   newPassword: string,
+  auditContext: AuditContext,
 ): Promise<number> => {
   const tokenRecord = await findPasswordResetTokenByHash(hashToken(token));
 
@@ -168,16 +172,27 @@ export const resetUserPassword = async (
   const passwordHash = await hashPassword(newPassword);
   const passwordChangedAt = new Date();
 
+  const auditLog = buildAuditLogData({
+    scope: AuditScope.SECURITY,
+    action: "PASSWORD_RESET",
+    actor: { id: tokenRecord.userId },
+    entityType: "USER",
+    entityId: tokenRecord.userId,
+    request: auditContext.request,
+  });
+
   // passwordChangedAt closes every session issued before the change and
   // mustChangePassword clears the forced-change state from invitations and
   // administrator resets. The conditional update inside applyPasswordReset
-  // guarantees the token is consumed exactly once.
+  // guarantees the token is consumed exactly once, and the audit row shares
+  // the same transaction.
   const wasApplied = await applyPasswordReset({
     tokenId: tokenRecord.id,
     userId: tokenRecord.userId,
     passwordHash,
     passwordChangedAt,
     now: passwordChangedAt,
+    auditLog,
   });
 
   if (!wasApplied) {

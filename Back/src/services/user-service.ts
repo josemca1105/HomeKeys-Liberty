@@ -1,4 +1,5 @@
-import { Prisma, Role } from "@prisma/client";
+import { Prisma, Role, AuditScope } from "@prisma/client";
+import { prisma } from "../config/database";
 import { environment } from "../config/env";
 import {
   countActiveUsersByRole,
@@ -30,6 +31,7 @@ import type {
   UserUpdateResult,
   PasswordChangeResult,
 } from "../types/user";
+import type { AuditAction, AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
 import {
@@ -44,6 +46,7 @@ import {
 } from "../utils/password";
 import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
 import { toUserResponse } from "../utils/user-response";
+import { recordAuditEventInTransaction } from "./audit-service";
 
 const duplicateEmailError = (): AppError => {
   return new AppError({
@@ -209,6 +212,7 @@ const sendInvitation = async (user: UserResponse): Promise<boolean> => {
 
 export const registerUser = async (
   input: CreateUserInput,
+  auditContext: AuditContext,
 ): Promise<RegisterUserResult> => {
   const existingUser = await findUserByEmail(input.email);
 
@@ -237,15 +241,35 @@ export const registerUser = async (
   let user;
 
   try {
-    user = await createUserRecord({
-      firstName: input.firstName,
-      lastName: input.lastName,
-      email: input.email,
-      passwordHash,
-      phone: input.phone,
-      photoUrl: input.photoUrl ?? null,
-      role: input.role ?? Role.PARTNER,
-      mustChangePassword: true,
+    user = await prisma.$transaction(async (transaction) => {
+      const createdUser = await createUserRecord(
+        {
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email: input.email,
+          passwordHash,
+          phone: input.phone,
+          photoUrl: input.photoUrl ?? null,
+          role: input.role ?? Role.PARTNER,
+          mustChangePassword: true,
+        },
+        transaction,
+      );
+
+      await recordAuditEventInTransaction(transaction, {
+        scope: AuditScope.SECURITY,
+        action: "USER_CREATED",
+        actor: auditContext.actor,
+        entityType: "USER",
+        entityId: createdUser.id,
+        changes: {
+          email: createdUser.email,
+          role: createdUser.role,
+        },
+        request: auditContext.request,
+      });
+
+      return createdUser;
     });
   } catch (error) {
     if (
@@ -267,6 +291,7 @@ export const registerUser = async (
 export const changeOwnPassword = async (
   userId: number,
   input: ChangePasswordInput,
+  auditContext: AuditContext,
 ): Promise<PasswordChangeResult> => {
   const user = await findUserCredentialsById(userId);
 
@@ -293,10 +318,30 @@ export const changeOwnPassword = async (
     "newPassword",
   );
 
-  const updatedUser = await updateUserAndInvalidateResetTokens(userId, {
-    passwordHash: await hashPassword(input.newPassword),
-    passwordChangedAt: passwordChangeTimestamp(),
-    mustChangePassword: false,
+  const newPasswordHash = await hashPassword(input.newPassword);
+
+  const updatedUser = await prisma.$transaction(async (transaction) => {
+    const updatedRecord = await updateUserAndInvalidateResetTokens(
+      userId,
+      {
+        passwordHash: newPasswordHash,
+        passwordChangedAt: passwordChangeTimestamp(),
+        mustChangePassword: false,
+      },
+      transaction,
+    );
+
+    await recordAuditEventInTransaction(transaction, {
+      scope: AuditScope.SECURITY,
+      action: "PASSWORD_CHANGED",
+      actor: { ...auditContext.actor, email: updatedRecord.email },
+      entityType: "USER",
+      entityId: updatedRecord.id,
+      changes: { mustChangePassword: updatedRecord.mustChangePassword },
+      request: auditContext.request,
+    });
+
+    return updatedRecord;
   });
 
   return {
@@ -309,6 +354,7 @@ export const updateUserByAdmin = async (
   targetUserId: number,
   input: UpdateUserInput,
   actingUserId: number,
+  auditContext: AuditContext,
 ): Promise<UserUpdateResult> => {
   const currentTarget = await findUserById(targetUserId);
 
@@ -423,13 +469,40 @@ export const updateUserByAdmin = async (
         const shouldInvalidateResetTokens =
           isChangingPassword || isChangingEmail || isDeactivating;
 
-        return shouldInvalidateResetTokens
-          ? updateUserAndInvalidateResetTokens(
+        const updatedRecord = shouldInvalidateResetTokens
+          ? await updateUserAndInvalidateResetTokens(
               targetUserId,
               updateData,
               transaction,
             )
-          : updateUserRecord(targetUserId, updateData, transaction);
+          : await updateUserRecord(targetUserId, updateData, transaction);
+
+        const auditAction: AuditAction = isChangingPassword
+          ? "USER_PASSWORD_RESET"
+          : isDeactivating
+            ? "USER_DEACTIVATED"
+            : isReactivating
+              ? "USER_REACTIVATED"
+              : "USER_UPDATED";
+
+        await recordAuditEventInTransaction(transaction, {
+          scope: AuditScope.SECURITY,
+          action: auditAction,
+          actor: auditContext.actor,
+          entityType: "USER",
+          entityId: updatedRecord.id,
+          changes: {
+            fields: Object.keys(input).filter((field) => field !== "password"),
+            passwordChanged: isChangingPassword,
+            email: updatedRecord.email,
+            role: updatedRecord.role,
+            isActive: updatedRecord.isActive,
+            ...(previousEmail !== null ? { previousEmail } : {}),
+          },
+          request: auditContext.request,
+        });
+
+        return updatedRecord;
       },
     );
 
@@ -491,6 +564,7 @@ export const updateUserByAdmin = async (
 export const deleteUserByAdmin = async (
   targetUserId: number,
   actingUserId: number,
+  auditContext: AuditContext,
 ): Promise<number> => {
   try {
     return await runSerializableTransaction(async (transaction) => {
@@ -528,6 +602,16 @@ export const deleteUserByAdmin = async (
       }
 
       await deleteUserWithRelatedTokens(targetUserId, transaction);
+
+      await recordAuditEventInTransaction(transaction, {
+        scope: AuditScope.SECURITY,
+        action: "USER_DELETED",
+        actor: auditContext.actor,
+        entityType: "USER",
+        entityId: targetUserId,
+        changes: { deletedId: targetUserId },
+        request: auditContext.request,
+      });
 
       return targetUserId;
     });
