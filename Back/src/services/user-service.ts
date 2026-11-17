@@ -26,6 +26,7 @@ import type {
   ListUsersQuery,
   PaginatedUsersResult,
   RegisterUserResult,
+  UpdateOwnProfileInput,
   UpdateUserInput,
   UserResponse,
   UserUpdateResult,
@@ -348,6 +349,53 @@ export const changeOwnPassword = async (
     user: toUserResponse(updatedUser),
     token: generateAuthToken(updatedUser.id, updatedUser.role),
   };
+};
+
+export const updateOwnProfile = async (
+  userId: number,
+  input: UpdateOwnProfileInput,
+  auditContext: AuditContext,
+): Promise<UserResponse> => {
+  const updateData: UpdateUserData = {
+    ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
+    ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
+    ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    ...(input.photoUrl !== undefined ? { photoUrl: input.photoUrl } : {}),
+  };
+
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const updatedUser = await updateUserRecord(
+        userId,
+        updateData,
+        transaction,
+      );
+
+      await recordAuditEventInTransaction(transaction, {
+        scope: AuditScope.SECURITY,
+        action: "USER_UPDATED",
+        actor: auditContext.actor,
+        entityType: "USER",
+        entityId: updatedUser.id,
+        changes: {
+          fields: Object.keys(input),
+          selfService: true,
+        },
+        request: auditContext.request,
+      });
+
+      return toUserResponse(updatedUser);
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      throw userNotFoundError("actualizar");
+    }
+
+    throw error;
+  }
 };
 
 export const updateUserByAdmin = async (

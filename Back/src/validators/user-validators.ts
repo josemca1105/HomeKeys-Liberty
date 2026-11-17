@@ -142,3 +142,17 @@ export const updateUserSchema = z
   .refine((body) => Object.keys(body).length > 0, {
     message: "Debes enviar al menos un campo para actualizar.",
   });
+
+export const updateOwnProfileSchema = z
+  .strictObject(
+    {
+      firstName: createPersonNameSchema("nombre").optional(),
+      lastName: createPersonNameSchema("apellido").optional(),
+      phone: phoneSchema.optional(),
+      photoUrl: photoUrlSchema,
+    },
+    { error: strictObjectError },
+  )
+  .refine((body) => Object.keys(body).length > 0, {
+    message: "Debes enviar al menos un campo para actualizar.",
+  });

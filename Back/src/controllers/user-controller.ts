@@ -4,12 +4,14 @@ import {
   getUserProfile,
   listUsers,
   registerUser,
+  updateOwnProfile,
   updateUserByAdmin,
 } from "../services/user-service";
 import type {
   ChangePasswordInput,
   CreateUserInput,
   ListUsersQuery,
+  UpdateOwnProfileInput,
   UpdateUserInput,
 } from "../types/user";
 import type { UserIdParams } from "../validators/user-validators";
@@ -76,6 +78,21 @@ export const changeMyPassword = asyncHandler(async (req, res): Promise<void> => 
     success: true,
     message: "Contraseña actualizada exitosamente.",
     data: { user, token },
+  });
+});
+
+export const updateMyProfile = asyncHandler(async (req, res): Promise<void> => {
+  const session = requireSession(req);
+  const input = req.body as UpdateOwnProfileInput;
+  const user = await updateOwnProfile(session.userId, input, {
+    actor: getAuditActor(session),
+    request: getAuditRequestContext(req),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Perfil actualizado exitosamente.",
+    data: { user },
   });
 });
 

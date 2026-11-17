@@ -26,6 +26,15 @@ export interface UpdateUserInput {
   password?: string;
 }
 
+// Fields a user can change about itself. Email, role, account status and
+// password have dedicated flows and are deliberately excluded.
+export interface UpdateOwnProfileInput {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  photoUrl?: string | null;
+}
+
 export interface ChangePasswordInput {
   currentPassword: string;
   newPassword: string;

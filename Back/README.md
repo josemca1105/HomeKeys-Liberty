@@ -400,6 +400,39 @@ Additional security responses:
 
 Protected routes read the current role from PostgreSQL. Changing an administrator to PARTNER therefore removes administrative access even for JWTs issued before the role change.
 
+### Update my profile
+
+```text
+PATCH /api/v1/users/me
+Authorization: Bearer <token>
+```
+
+Available to both `ADMIN` and `PARTNER`. Users can update their own profile without an administrator:
+
+```json
+{
+  "firstName": "María",
+  "lastName": "González",
+  "phone": "+58 412-123 4567",
+  "photoUrl": "https://example.com/avatar.jpg"
+}
+```
+
+Rules:
+
+- Accepted fields: `firstName`, `lastName`, `phone`, and `photoUrl`. At least one is required.
+- `email`, `role`, `isActive`, and `password` are rejected (`400 VALIDATION_ERROR`); they have dedicated administrative or password endpoints.
+- Names, phone numbers, and photo URLs use the same validation as the ADMIN endpoints.
+- The route is blocked with `403 PASSWORD_CHANGE_REQUIRED` while a mandatory password change is pending.
+- The update and its `USER_UPDATED` audit event (with `selfService: true`) share one transaction.
+
+Possible responses:
+
+- `200`: profile updated; `data.user` is returned without credentials.
+- `400 VALIDATION_ERROR`: invalid body or invalid field values.
+- `401`: missing, invalid, expired, or revoked token.
+- `403 PASSWORD_CHANGE_REQUIRED`: the user must define a new password first.
+
 ### Change my password
 
 ```text

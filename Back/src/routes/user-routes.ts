@@ -6,6 +6,7 @@ import {
   getUserById,
   getUsers,
   removeUser,
+  updateMyProfile,
   updateUser,
 } from "../controllers/user-controller";
 import { authenticate } from "../middleware/authenticate";
@@ -22,6 +23,7 @@ import {
   changePasswordSchema,
   createUserSchema,
   listUsersQuerySchema,
+  updateOwnProfileSchema,
   updateUserSchema,
   userIdParamsSchema,
 } from "../validators/user-validators";
@@ -54,6 +56,14 @@ userRoutes.patch(
   validateRequest(changePasswordSchema),
   passwordChangeRateLimiter,
   changeMyPassword,
+);
+
+userRoutes.patch(
+  "/me",
+  authenticate,
+  enforcePasswordChange,
+  validateRequest(updateOwnProfileSchema),
+  updateMyProfile,
 );
 
 userRoutes.patch(

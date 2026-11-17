@@ -256,6 +256,33 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Users]
+      summary: Update my profile
+      description: |
+        Any authenticated user can update its own names, phone and photo. Email,
+        role, account status and password are not accepted here; they have
+        dedicated ADMIN or password endpoints. Blocked while a mandatory
+        password change is pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOwnProfileRequest"
+      responses:
+        "200":
+          description: Profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/users/me/password:
     patch:
       tags: [Users]
@@ -771,6 +798,27 @@ components:
           type: string
           minLength: 12
           maxLength: 72
+    UpdateOwnProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        phone:
+          type: string
+          minLength: 6
+          maxLength: 20
+          pattern: '^\+?[0-9\s().-]{6,20}$'
+        photoUrl:
+          type: [string, "null"]
+          format: uri
     ChangePasswordRequest:
       type: object
       additionalProperties: false
