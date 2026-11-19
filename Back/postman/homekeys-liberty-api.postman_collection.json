@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - API",
-    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Delete user, Change my password, Logout. Create user sends a welcome email with a single-use activation link so the new user defines a personal password; the response returns invitationSent and no passwords (data.user.mustChangePassword stays true until the user changes it, and management routes answer 403 PASSWORD_CHANGE_REQUIRED meanwhile). Explicit passwords in the body must satisfy the password policy and are never emailed. Change my password rotates the login password: on success it stores the returned token in accessToken and copies newUserPassword into loginPassword. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.\n\nRequests are grouped into folders: Auth, Users, Audit and Captaciones. Captaciones is reserved for the next module.",
+    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Update my profile, Deactivate user, Reactivate user, Send password reset link, Resend invitation, Change my password, Delete user, Logout. The ADMIN never sets passwords: Create user queues a single-use invitation and the user defines their own password through the link. Send password reset link and Resend invitation queue emails through the durable outbox; emailSent means the email was queued. Update user does not accept a password. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.\n\nRequests are grouped into folders: Auth, Users, Audit, Health and Captaciones. Captaciones is reserved for the next module.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -50,6 +50,10 @@
     {
       "key": "targetUserId",
       "value": ""
+    },
+    {
+      "key": "rootUrl",
+      "value": "http://localhost:3000"
     }
   ],
   "item": [
@@ -456,6 +460,233 @@
           "response": []
         },
         {
+          "name": "Update my profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Any authenticated user can update its own profile', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.message).to.eql('Perfil actualizado exitosamente.');",
+                  "    pm.expect(responseBody.data.user).to.not.have.property('passwordHash');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Profile\",\n  \"phone\": \"04120000000\",\n  \"photoUrl\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deactivate user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can deactivate a user', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.user.isActive).to.eql(false);",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot deactivate users', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can reactivate a user', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.user.isActive).to.eql(true);",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot reactivate users', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send password reset link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can queue a password reset link', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.emailSent).to.eql(true);",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot send password reset links', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}/send-password-reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}",
+                "send-password-reset"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resend invitation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "const role = pm.collectionVariables.get('currentUserRole');",
+                  "if (role === 'ADMIN') {",
+                  "    pm.test('ADMIN can queue a new invitation', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseBody.data.emailSent).to.eql(true);",
+                  "    });",
+                  "} else {",
+                  "    pm.test('PARTNER cannot resend invitations', function () {",
+                  "        pm.response.to.have.status(403);",
+                  "        pm.expect(responseBody.code).to.eql('ADMIN_REQUIRED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetUserId}}/resend-invitation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetUserId}}",
+                "resend-invitation"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Change my password",
           "event": [
             {
@@ -578,6 +809,76 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/audit-logs?page=1&pageSize=20"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "description": "Public liveness and readiness probes. They are mounted before the global rate limiter.",
+      "item": [
+        {
+          "name": "Health",
+          "auth": {
+            "type": "noauth"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('API is alive', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{rootUrl}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Ready",
+          "auth": {
+            "type": "noauth"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Readiness responds', function () {",
+                  "    pm.expect([200, 503]).to.include(pm.response.code);",
+                  "    if (pm.response.code === 200) {",
+                  "        pm.expect(responseBody.data.status).to.eql('ready');",
+                  "    } else {",
+                  "        pm.expect(responseBody.code).to.eql('NOT_READY');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{rootUrl}}/ready"
           },
           "response": []
         }

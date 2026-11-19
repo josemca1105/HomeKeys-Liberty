@@ -787,16 +787,17 @@ Import:
 postman/homekeys-liberty-api.postman_collection.json
 ```
 
-The collection is organized into four folders:
+The collection is organized into five folders:
 
 - `Auth`: `Login`, `Forgot password`, `Reset password` and `Logout`.
-- `Users`: `Get current user`, `Get all users` (paginated), `Get user by ID`, `Create user`, `Create user with ADMIN role`, `Update user`, `Change my password` and `Delete user`.
+- `Users`: `Get current user`, `Get all users` (paginated), `Get user by ID`, `Create user`, `Create user with ADMIN role`, `Update user`, `Update my profile`, `Deactivate user`, `Reactivate user`, `Send password reset link`, `Resend invitation`, `Change my password` and `Delete user`.
 - `Audit`: `Get audit history`; ADMIN sees all events, PARTNER only its own.
+- `Health`: public `Health` (liveness) and `Ready` (database readiness) probes using `rootUrl`.
 - `Captaciones`: reserved for the property/captaciones API and intentionally empty for now.
 
 Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
 
-Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Delete user`, `Change my password`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` sends a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
+Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Update my profile`, `Deactivate user`, `Reactivate user`, `Send password reset link`, `Resend invitation`, `Change my password`, `Delete user`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` queues a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
 
 The role-specific scenarios are covered by `npm test`; the Postman collection intentionally keeps one login contract for frontend consumers.
 
@@ -805,6 +806,8 @@ These requests can create, modify, and delete users in the target database. Run 
 ## Testing the user flows from Postman
 
 Prerequisites: the API running locally (`npm run dev`) with SMTP configured in `.env`, and these collection variables set with local values: `loginEmail` (an ADMIN seed account), `loginPassword`, and `newUserPassword` (policy-compliant, for example `Ejemplo#2026x`). Leave `targetUserId` and `resetToken` empty; the tests and the steps below fill them in.
+
+Emails are queued in the durable outbox by the API request and delivered by the background worker that `npm run dev` starts (every minute, with retries). Expect the email within about a minute; `emailSent` and `invitationSent` mean the email was queued, not that SMTP already accepted it.
 
 Account activation and password recovery share `POST /auth/reset-password`, so the `Reset password` request serves both purposes.
 
@@ -837,7 +840,7 @@ The ADMIN never sets or learns the password; the user defines it through the sin
 
 ### Flow 4: manage the created user
 
-`Update user` and `Delete user` use `{{targetUserId}}`, which `Create user` captures automatically. Deleting a user with properties answers `409 USER_HAS_PROPERTIES`.
+`Update user` and `Delete user` use `{{targetUserId}}`, which `Create user` captures automatically. `Update my profile` edits the authenticated user. `Deactivate user` and `Reactivate user` toggle `isActive`; the deactivated user cannot sign in and receives a notice. `Resend invitation` reissues the activation link for an account that is still pending activation. `Send password reset link` works for active accounts. Deleting a user with properties answers `409 USER_HAS_PROPERTIES`.
 
 Notes:
 
@@ -846,6 +849,7 @@ Notes:
 - Rate limits: `login` allows 5 failures per account and 30 per client IP every 15 minutes; `forgot-password` allows 5 requests per email and 20 per client IP; `reset-password` allows 10 requests per client IP and 5 per token. Password changes allow 5 failures per user every 15 minutes.
 - Reusing an activation or recovery link returns `400 RESET_TOKEN_ALREADY_USED`; links older than their validity return `400 RESET_TOKEN_EXPIRED`.
 - Welcome and reset emails never contain passwords, only single-use links. The ADMIN never knows any user credential.
+- Deactivation and reactivation queue a notice to the account email; delivery is best-effort through the outbox and never blocks the administrative change.
 
 ## Automated tests
 

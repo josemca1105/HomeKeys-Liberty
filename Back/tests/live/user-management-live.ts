@@ -289,6 +289,18 @@ const run = async (): Promise<void> => {
   const createdToken = await login(createdEmail, LIVE_PARTNER_PASSWORD);
   assert.ok(createdToken);
 
+  const selfEditResponse = await request(app)
+    .patch("/api/v1/users/me")
+    .set("Authorization", `Bearer ${createdToken}`)
+    .send({
+      firstName: "Live",
+      lastName: "SelfUpdated",
+      phone: "04120000002",
+    });
+
+  assert.equal(selfEditResponse.status, 200);
+  assert.equal(selfEditResponse.body.data.user.lastName, "SelfUpdated");
+
   const changePasswordResponse = await request(app)
     .patch("/api/v1/users/me/password")
     .set("Authorization", `Bearer ${createdToken}`)
