@@ -35,8 +35,9 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Self-service password change with bcrypt verification and invalidation of previous sessions.
 - Account deactivation and reactivation without deleting history: deactivated accounts cannot sign in or keep using existing sessions.
 - Automatic email invitations for administrator-created users, with a single-use activation link.
-- Password policy with a 12-character minimum, four character classes and a common-password blocklist on every password defined through the API.
-- Mandatory password change for accounts created or reset by an ADMIN.
+- Administrators send password reset links; they never set, receive, or learn a password.
+- Password policy with a 12-character minimum, four character classes, a common-password blocklist and rejection of the last 5 passwords.
+- Mandatory password change enforcement for accounts that still carry the flag.
 - Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
 - Per-IP, per-account and global rate limiting, with an optional Redis store for multiple instances.
 - A configurable CORS allowlist and Express `trust proxy` setting.
@@ -208,7 +209,7 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 
 The current physical database schema is entirely in English:
 
-- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `login_attempts`, and `audit_logs`.
+- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `password_history`, `login_attempts`, and `audit_logs`.
 - User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`. The `email` column uses PostgreSQL `citext`, so case-insensitive duplicates are rejected by the database itself, not only by the API validators.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
@@ -354,7 +355,7 @@ Authorization: Bearer <token>
 
 Only ADMIN users can access this endpoint.
 
-Example with the default PARTNER role and no explicit password:
+Example with the default PARTNER role:
 
 ```json
 {
@@ -366,13 +367,13 @@ Example with the default PARTNER role and no explicit password:
 }
 ```
 
-The `password` field is optional and is never disclosed. When it is omitted, the API generates a random initial password internally; when it is sent explicitly, it must satisfy the password policy and only the ADMIN knows it (it is never emailed).
+The administrator never sets, receives, or learns the password. The API generates a random internal credential that is never disclosed; the account is activated only through the single-use invitation link sent to the user's email.
 
-The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR` instead of being silently ignored.
+The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR` instead of being silently ignored. Sending `password` here is rejected.
 
 The optional `photoUrl` must be an absolute `http` or `https` URL without embedded credentials. `javascript:`, `data:`, `ftp:` and literal localhost, private, link-local or internal hosts are rejected.
 
-Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend the link through `POST /auth/forgot-password`.
+Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend a link with `POST /users/:id/send-password-reset`.
 
 To create another administrator, add:
 
@@ -452,8 +453,8 @@ Available to both `ADMIN` and `PARTNER`. The body is strict and must contain exa
 Validation rules:
 
 - `currentPassword` is mandatory and is verified against the stored bcrypt hash.
-- `newPassword` requires at least 8 characters and cannot exceed 72 UTF-8 bytes.
-- `newPassword` cannot be equal to `currentPassword`.
+- `newPassword` requires at least 12 characters and cannot exceed 72 UTF-8 bytes.
+- `newPassword` cannot be equal to `currentPassword` or to any of the last 5 passwords.
 - Unknown fields are rejected with `400 VALIDATION_ERROR`.
 - Only the bcrypt hash is stored; hashes are never returned.
 
@@ -483,21 +484,20 @@ Only `ADMIN` users can access this endpoint. `ADMIN` can edit any user, includin
   "phone": "00000000",
   "photoUrl": null,
   "role": "PARTNER",
-  "isActive": true,
-  "password": "OPTIONAL_NEW_PASSWORD"
+  "isActive": true
 }
 ```
 
 Validation rules:
 
-- Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, `isActive`, and `password`. Unknown fields are rejected, including `id`, `createdAt`, and `updatedAt`.
+- Accepted fields: `firstName`, `lastName`, `email`, `phone`, `photoUrl`, `role`, and `isActive`. Unknown fields are rejected, including `id`, `createdAt`, `updatedAt`, and `password`.
 - `photoUrl` must be an absolute `http` or `https` URL without embedded credentials; `null` clears it. Literal localhost, private, link-local and internal hosts are rejected.
 - `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address, and sends a notice to the previous address. The notice never includes the new address, so a compromised old mailbox cannot learn where the account moved; delivery is best-effort and never fails the update.
 - `role` accepts only `ADMIN` or `PARTNER`.
 - `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, and deletes pending invitation or recovery links. Reactivation invalidates every session issued before the deactivation, so users must sign in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
-- `password` is optional and allows an administrator to set a new password without knowing the current one. It is hashed with bcrypt, invalidates every session previously issued for that user, and deletes any pending invitation or password recovery link.
 - Demoting or deactivating the last active `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; inactive administrators do not count. An `ADMIN` can demote itself whenever another active `ADMIN` remains. The check and the update run in the same serializable transaction, so concurrent changes cannot leave the system without active administrators.
-- When an `ADMIN` resets its own password through this endpoint, the response also includes a fresh `data.token` so the current session continues.
+
+Passwords are never set through this endpoint. To let a user define a new password, use `POST /users/:id/send-password-reset`.
 
 Possible responses:
 
@@ -510,6 +510,31 @@ Possible responses:
 - `409 EMAIL_ALREADY_REGISTERED`: the new email belongs to another user.
 - `409 LAST_ADMIN_REQUIRED`: the change would leave the system without active administrators.
 - `409 SELF_DEACTIVATION_NOT_ALLOWED`: the target is the authenticated administrator and `isActive` is `false`.
+
+### Send a password reset link
+
+```text
+POST /api/v1/users/:id/send-password-reset
+Authorization: Bearer <token>
+```
+
+Only `ADMIN` users can access this endpoint. It issues a single-use link (15 minutes) and sends it to the user's email. The administrator never sees or sets the password, and the audit log records `PASSWORD_RESET_LINK_SENT` in the same transaction as the token issuance.
+
+Rules:
+
+- Deactivated accounts are rejected with `409 USER_INACTIVE`; reactivate the account first.
+- Any previously pending invitation or recovery link for that user is replaced.
+- The response reports `data.emailSent`: `false` means the token was issued but SMTP delivery failed. The ADMIN can retry; the previous token is replaced again.
+
+Possible responses:
+
+- `200`: link issued; check `data.emailSent`.
+- `400 VALIDATION_ERROR`: invalid user ID.
+- `401`: missing, invalid, expired, or revoked token.
+- `403 ADMIN_REQUIRED`: authenticated user is not an administrator.
+- `404 USER_NOT_FOUND`: nonexistent ID.
+- `409 USER_INACTIVE`: the account is deactivated.
+- `429 TOO_MANY_ADMIN_ACTIONS`: rate limit exceeded.
 
 ### Delete a user
 
@@ -608,7 +633,7 @@ Public endpoint. The body is strict: unknown fields are rejected with `400 VALID
 }
 ```
 
-When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}#token=<token>` — the token travels in the URL fragment, never in the query string, so it cannot reach server logs, proxies or `Referer` headers; the frontend reads it from `window.location.hash`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email.
+When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}#token=<token>` — the token travels in the URL fragment, never in the query string, so it cannot reach server logs, proxies or `Referer` headers; the frontend reads it from `window.location.hash`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email. Deactivated accounts receive no recovery email, while the response stays generic.
 
 Token issuance and SMTP delivery run in the background after the generic response is sent. This keeps the response time approximately the same whether the email exists or not, closing the timing side channel that would otherwise reveal registered accounts. Delivery failures are logged server-side and do not change the response. A durable email queue is a future improvement for guaranteed delivery across process restarts.
 
@@ -660,9 +685,11 @@ Possible responses:
 
 ## Mandatory password change
 
-Accounts created by an ADMIN or reset by an ADMIN through `PATCH /users/:id` carry `mustChangePassword: true` in the `user` DTO. Until the user defines a personal password:
+Accounts can still carry `mustChangePassword: true` in the `user` DTO (for example, legacy rows or accounts prepared manually in the database). The flag is enforced defensively even though the current flows do not set it: invited users activate through the invitation link, and administrators never set passwords.
 
-- `GET /users/me`, `PATCH /users/me/password`, and `POST /auth/logout` stay available so the frontend can render the mandatory change screen.
+Until the flag is cleared:
+
+- `GET /users/me`, `PATCH /users/me`, `PATCH /users/me/password`, and `POST /auth/logout` stay available so the frontend can render the mandatory change screen.
 - Every other protected route answers `403 PASSWORD_CHANGE_REQUIRED` with "Debes cambiar tu contraseña para continuar."
 
 The flag clears when the user defines a personal password through `PATCH /users/me/password`, the activation link, or the recovery link. Any protected route added in the future must include the `enforcePasswordChange` middleware to preserve this behavior.
@@ -678,11 +705,12 @@ Every password defined through the API must satisfy this policy:
 - Character classes are Unicode-aware: `ñ` and accented letters count as letters, not as special characters.
 - It cannot be a common or predictable password: a local blocklist rejects well-known passwords, product-related terms (`homekeys`, `liberty`) and common base words padded only with digits (for example `Password2026!`). Case, accents and separators are ignored when matching.
 - It cannot be based on the account email or name: the email, its local part, the first name, the last name or the full name, optionally followed only by digits (for example `MariaGonzalez2026!`).
+- It cannot repeat the current password or any of the last 5 passwords (history is checked with bcrypt against stored previous hashes).
 - The new password cannot be equal to the current one on `PATCH /api/v1/users/me/password`.
 
-The policy applies wherever a password is defined: the optional `password` of `POST /users/add`, the `newPassword` of `PATCH /users/me/password`, the `newPassword` of `POST /auth/reset-password`, and the administrator `password` reset of `PATCH /users/:id`. Violations return `400 VALIDATION_ERROR` with a field-level message.
+The policy applies wherever a password is defined by the user: the `newPassword` of `PATCH /users/me/password` and the `newPassword` of `POST /auth/reset-password` (recovery and invitation activation). Administrators never define passwords. Violations return `400 VALIDATION_ERROR` with a field-level message.
 
-The policy is not retroactive: existing passwords keep working and are only replaced through a new change or reset. Initial passwords generated by the API are never disclosed and always satisfy the policy. Example of a valid password: `Ejemplo#2026x`.
+The history keeps the last 5 replaced passwords per user. Rows are pruned after every change and deleted with the user. The policy is not retroactive: existing passwords keep working and are only replaced through a new change or reset. Initial passwords generated by the API are never disclosed and always satisfy the policy. Example of a valid password: `Ejemplo#2026x`.
 
 ## Phone and name validation
 
@@ -733,7 +761,7 @@ Errors use a consistent structure:
 
 Unexpected errors return a generic Spanish message without exposing SQL queries, stack traces, tokens, or credentials.
 
-User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
+User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `USER_INACTIVE`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
 
 ## Postman collection
 
@@ -769,24 +797,25 @@ Account activation and password recovery share `POST /auth/reset-password`, so t
 | Step | Request | What happens | What to verify |
 | --- | --- | --- | --- |
 | 1 | `Login` | The ADMIN signs in | `200`; `accessToken`, `currentUserId`, and `currentUserRole` are stored |
-| 2 | `Create user` (body without `password`) | The user is created and the welcome email is sent | `201`, `data.invitationSent: true`, `data.user.mustChangePassword: true`, no `temporaryPassword`; the test stores the id in `targetUserId` |
+| 2 | `Create user` | The user is created and the welcome email is sent. The body does not accept a password | `201`, `data.invitationSent: true`, `data.user.mustChangePassword: true`, no `temporaryPassword`; the test stores the id in `targetUserId` |
 | 3 | The new user's mailbox | "Bienvenido a HomeKeys Liberty - Activa tu cuenta" arrives | Press "Activar mi cuenta" and copy the `token=` value from the link |
 | 4 | Paste it into the `resetToken` collection variable | — | — |
 | 5 | `Reset password` (`token: {{resetToken}}`, `newPassword: {{newUserPassword}}`) | The user defines a personal password | `200` "Contraseña restablecida exitosamente." |
 | 6 | `Login` with the new user's email and password | The user signs in | `200` and `data.user.mustChangePassword: false` |
 
-### Flow 2: mandatory password change (password set by the ADMIN)
+### Flow 2: ADMIN sends a password reset link
 
-1. `Create user` with `"password": "{{newUserPassword}}"` added to the body (it must satisfy the password policy).
-2. `Login` as that user with that password → `200` and `data.user.mustChangePassword: true`.
-3. `Get all users`, `Update user`, or `Delete user` → `403 PASSWORD_CHANGE_REQUIRED` ("Debes cambiar tu contraseña para continuar.").
-4. `Get current user` → still `200`, so the frontend can render the change screen.
-5. `Change my password` (`currentPassword: {{newUserPassword}}` and a policy-compliant `newPassword`) → `200`; use the fresh `accessToken` from the response.
-6. `Get all users` with that token → `200` again (access restored).
+1. `Login` as the ADMIN and copy `targetUserId` of the user whose password must be reset.
+2. `Send password reset link` (`POST /users/{{targetUserId}}/send-password-reset`) → `200` with `data.emailSent`.
+3. Open the received "Restablece tu contraseña" email and copy the `token=` value into `resetToken`.
+4. Run `Reset password` with a policy-compliant `newPassword` → `200`. Every previous session is closed.
+5. `Login` with the new password → `200`.
+
+The ADMIN never sets or learns the password; the user defines it through the single-use link.
 
 ### Flow 3: forgot password
 
-1. `Forgot password` with the user's email → always the same generic `200`, whether the account exists or not.
+1. `Forgot password` with the user's email → always the same generic `200`, whether the account exists or not. Deactivated accounts receive no email.
 2. Open the received "Restablece tu contraseña" email and copy the `token=` value.
 3. Paste it into `resetToken` and run `Reset password` with a new password → `200`; every previous session is closed and the user signs in with the new password.
 
@@ -796,11 +825,11 @@ Account activation and password recovery share `POST /auth/reset-password`, so t
 
 Notes:
 
-- `newUserPassword` must satisfy the password policy and differ from the current password, or the request returns `400 VALIDATION_ERROR`.
+- `newUserPassword` must satisfy the password policy, differ from the current password, and not match any of the last 5 passwords, or the request returns `400 VALIDATION_ERROR`.
 - `Reset password` and `Change my password` copy `newUserPassword` into `loginPassword` on success, which is convenient when the tested user is the same one configured in `loginEmail`.
 - Rate limits: `login` allows 5 failures per account and 30 per client IP every 15 minutes; `forgot-password` allows 5 requests per email and 20 per client IP; `reset-password` allows 10 requests per client IP and 5 per token. Password changes allow 5 failures per user every 15 minutes.
 - Reusing an activation or recovery link returns `400 RESET_TOKEN_ALREADY_USED`; links older than their validity return `400 RESET_TOKEN_EXPIRED`.
-- Welcome emails never contain passwords; when the ADMIN sets an explicit password, the ADMIN communicates it through their own channel.
+- Welcome and reset emails never contain passwords, only single-use links. The ADMIN never knows any user credential.
 
 ## Automated tests
 
@@ -902,6 +931,7 @@ prisma/migrations/20261111120000_add_audit_logs/
 prisma/migrations/20261112130000_add_login_lockout/
 prisma/migrations/20261112140000_add_user_is_active/
 prisma/migrations/20261116120000_use_citext_email/
+prisma/migrations/20261116160000_add_password_history/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -917,6 +947,8 @@ The fifth one creates the `login_attempts` table behind the persistent account l
 The sixth one adds `users.is_active` for account deactivation. Deactivated accounts keep every relation and audit row, but login and existing sessions are blocked with `403 ACCOUNT_INACTIVE`; reactivation invalidates the sessions issued before the deactivation.
 
 The seventh one converts `users.email` to PostgreSQL `citext` (enabling the extension), so the unique index rejects case-variant duplicates even when rows are written outside the API. The API keeps normalizing emails to lowercase, and the live check `tests/live/email-case-live.ts` verifies the database behavior.
+
+The eighth one creates `password_history` to reject reuse of the last 5 passwords. The table cascades with the user, keeps one row per replaced bcrypt hash, and is pruned inside the same transaction that changes the password.
 
 Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
@@ -945,9 +977,10 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account. An email change also notifies the previous address without revealing the new one.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction. Database foreign keys also cascade those rows if a user is deleted outside the API.
-- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and SMTP delivery run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested.
+- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and SMTP delivery run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested. Deactivated accounts receive no recovery email.
+- Administrators never set, receive, or learn passwords. `POST /users/:id/send-password-reset` issues a single-use link; the user defines the password. Every replaced password is stored as a bcrypt hash in `password_history`, and the last 5 cannot be reused through either the change or the recovery flow.
 - User accounts never expose a password anywhere: initial passwords are generated internally, invitation and notice emails carry only links, and explicit ADMIN passwords travel through their own channel. Invitation tokens are single-use and valid for 24 hours.
-- Accounts created or reset by an ADMIN must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`), and administrator password resets notify the affected user by email without including the new password.
+- Accounts that still carry `mustChangePassword` must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`). Current flows do not set the flag; it is enforced defensively for legacy or manually prepared accounts.
 - Profile photo URLs only accept `http` or `https`, reject embedded credentials, and reject literal localhost, private, link-local and internal hosts. This prevents stored XSS through `javascript:`/`data:` URLs and basic SSRF attempts against local or cloud-metadata addresses. If the backend later downloads images, it must also resolve DNS and enforce an allowlist or an SSRF-safe fetcher.
 - A successful password reset closes every session issued before the reset through `users.password_changed_at`; the user signs in again with the new password.
 - Recovery emails never include passwords, only the one-time link. SMTP secrets live exclusively in the ignored `.env` file and must never be committed; rotate the Gmail app password if it is ever exposed.

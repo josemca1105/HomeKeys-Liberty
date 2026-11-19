@@ -6,6 +6,7 @@ import {
   getUserById,
   getUsers,
   removeUser,
+  sendPasswordResetLink,
   updateMyProfile,
   updateUser,
 } from "../controllers/user-controller";
@@ -64,6 +65,16 @@ userRoutes.patch(
   enforcePasswordChange,
   validateRequest(updateOwnProfileSchema),
   updateMyProfile,
+);
+
+userRoutes.post(
+  "/:id/send-password-reset",
+  authenticate,
+  enforcePasswordChange,
+  isAdmin,
+  userManagementRateLimiter,
+  validateParams(userIdParamsSchema),
+  sendPasswordResetLink,
 );
 
 userRoutes.patch(

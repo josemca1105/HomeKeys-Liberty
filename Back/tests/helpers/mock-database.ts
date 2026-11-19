@@ -3,6 +3,7 @@ import type {
   AuditLog,
   AuditScope,
   LoginAttempt,
+  PasswordHistory,
   PasswordResetToken,
   RevokedToken,
   User,
@@ -249,6 +250,7 @@ interface TransactionClientMock {
   passwordResetToken: PasswordResetTokenDelegateMock;
   loginAttempt: LoginAttemptDelegateMock;
   auditLog: AuditLogDelegateMock;
+  passwordHistory: PasswordHistoryDelegateMock;
 }
 
 interface LoginAttemptDelegateMock {
@@ -275,11 +277,28 @@ interface LoginAttemptDelegateMock {
   }) => Promise<{ count: number }>;
 }
 
+interface PasswordHistoryDelegateMock {
+  create: (args: {
+    data: { userId: number; passwordHash: string };
+  }) => Promise<PasswordHistory>;
+  findMany: (args: {
+    where: { userId: number };
+    orderBy?: Array<Record<string, string>>;
+    skip?: number;
+    take?: number;
+    select?: { passwordHash?: boolean; id?: boolean };
+  }) => Promise<Array<Partial<PasswordHistory>>>;
+  deleteMany: (args: {
+    where: { id: { in: number[] } };
+  }) => Promise<{ count: number }>;
+}
+
 export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
   loginAttempts: LoginAttempt[];
+  passwordHistory: PasswordHistory[];
   auditLogs: AuditLog[];
   getUserCreateCallCount: () => number;
   getUserFindManyCallCount: () => number;
@@ -358,6 +377,7 @@ export const createMockDatabase = (): MockDatabase => {
   const revokedTokens: RevokedToken[] = [];
   const passwordResetTokens: PasswordResetToken[] = [];
   const loginAttempts: LoginAttempt[] = [];
+  const passwordHistoryEntries: PasswordHistory[] = [];
   const auditLogs: AuditLog[] = [];
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
@@ -377,6 +397,66 @@ export const createMockDatabase = (): MockDatabase => {
     prisma.auditLog as unknown as AuditLogDelegateMock;
   const loginAttemptDelegate =
     prisma.loginAttempt as unknown as LoginAttemptDelegateMock;
+  const passwordHistoryDelegate =
+    prisma.passwordHistory as unknown as PasswordHistoryDelegateMock;
+
+  passwordHistoryDelegate.create = async (args): Promise<PasswordHistory> => {
+    const nextId =
+      passwordHistoryEntries.length > 0
+        ? Math.max(...passwordHistoryEntries.map((entry) => entry.id)) + 1
+        : 1;
+
+    const entry: PasswordHistory = {
+      id: nextId,
+      userId: args.data.userId,
+      passwordHash: args.data.passwordHash,
+      createdAt: new Date(),
+    };
+    passwordHistoryEntries.push(entry);
+    return { ...entry };
+  };
+
+  passwordHistoryDelegate.findMany = async (args) => {
+    const ordered = passwordHistoryEntries
+      .filter((entry) => entry.userId === args.where.userId)
+      .sort((first, second) => {
+        const byDate =
+          second.createdAt.getTime() - first.createdAt.getTime();
+        return byDate !== 0 ? byDate : second.id - first.id;
+      });
+    const skip = args.skip ?? 0;
+    const take = args.take ?? ordered.length;
+    const selected = ordered.slice(skip, skip + take);
+
+    return selected.map((entry) => {
+      const projection: Partial<PasswordHistory> = {};
+
+      if (args.select?.passwordHash) {
+        projection.passwordHash = entry.passwordHash;
+      }
+
+      if (args.select?.id) {
+        projection.id = entry.id;
+      }
+
+      return Object.keys(projection).length > 0 ? projection : { ...entry };
+    });
+  };
+
+  passwordHistoryDelegate.deleteMany = async (args) => {
+    const ids = new Set(args.where.id.in);
+    const previousCount = passwordHistoryEntries.length;
+    const remaining = passwordHistoryEntries.filter(
+      (entry) => !ids.has(entry.id),
+    );
+
+    passwordHistoryEntries.splice(
+      0,
+      passwordHistoryEntries.length,
+      ...remaining,
+    );
+    return { count: previousCount - remaining.length };
+  };
 
   loginAttemptDelegate.findUnique = async (
     args,
@@ -999,6 +1079,7 @@ export const createMockDatabase = (): MockDatabase => {
     passwordResetToken: passwordResetTokenDelegate,
     loginAttempt: loginAttemptDelegate,
     auditLog: auditLogDelegate,
+    passwordHistory: passwordHistoryDelegate,
   };
 
   let serializableTransactionQueue: Promise<unknown> = Promise.resolve();
@@ -1052,6 +1133,7 @@ export const createMockDatabase = (): MockDatabase => {
     revokedTokens,
     passwordResetTokens,
     loginAttempts,
+    passwordHistory: passwordHistoryEntries,
     auditLogs,
     getUserCreateCallCount: (): number => userCreateCallCount,
     getUserFindManyCallCount: (): number => userFindManyCallCount,

@@ -4,6 +4,7 @@ import {
   getUserProfile,
   listUsers,
   registerUser,
+  sendPasswordResetLinkByAdmin,
   updateOwnProfile,
   updateUserByAdmin,
 } from "../services/user-service";
@@ -100,7 +101,7 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
   const session = requireSession(req);
   const userId = (req.validatedParams as UserIdParams).id;
   const input = req.body as UpdateUserInput;
-  const { user, token } = await updateUserByAdmin(
+  const { user } = await updateUserByAdmin(
     userId,
     input,
     session.userId,
@@ -113,9 +114,26 @@ export const updateUser = asyncHandler(async (req, res): Promise<void> => {
   res.status(200).json({
     success: true,
     message: "Usuario actualizado exitosamente.",
-    data: { user, ...(token ? { token } : {}) },
+    data: { user },
   });
 });
+
+export const sendPasswordResetLink = asyncHandler(
+  async (req, res): Promise<void> => {
+    const session = requireSession(req);
+    const userId = (req.validatedParams as UserIdParams).id;
+    const { emailSent } = await sendPasswordResetLinkByAdmin(userId, {
+      actor: getAuditActor(session),
+      request: getAuditRequestContext(req),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Enlace de restablecimiento enviado.",
+      data: { emailSent },
+    });
+  },
+);
 
 export const removeUser = asyncHandler(async (req, res): Promise<void> => {
   const session = requireSession(req);

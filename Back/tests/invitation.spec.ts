@@ -154,25 +154,18 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     );
   });
 
-  it("blocks management routes until an invited ADMIN defines its password", async () => {
-    const adminToken = (
-      await login("admin@example.com", TEST_ADMIN_PASSWORD)
-    ).token;
-
-    const createResponse = await request(app)
-      .post("/api/v1/users/add")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({
-        firstName: "Test",
-        lastName: "InvitedAdmin",
-        email: "invited-admin@example.com",
-        password: TEST_PARTNER_PASSWORD,
-        phone: "00000000",
-        photoUrl: null,
-        role: Role.ADMIN,
-      });
-
-    assert.equal(createResponse.status, 201);
+  it("blocks management routes while a password change is required", async () => {
+    database.addUser({
+      id: 3,
+      email: "invited-admin@example.com",
+      role: Role.ADMIN,
+      password: TEST_PARTNER_PASSWORD,
+    });
+    const invitedAdmin = database.users.find(
+      (user) => user.email === "invited-admin@example.com",
+    );
+    assert.ok(invitedAdmin);
+    invitedAdmin.mustChangePassword = true;
 
     const session = await login(
       "invited-admin@example.com",
@@ -227,51 +220,7 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     assert.equal(logoutResponse.status, 200);
   });
 
-  it("forces a password change again after an ADMIN password reset and sends a notice", async () => {
-    const adminToken = (
-      await login("admin@example.com", TEST_ADMIN_PASSWORD)
-    ).token;
-
-    const resetResponse = await request(app)
-      .patch("/api/v1/users/2")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ password: TEST_CHANGED_PASSWORD });
-
-    assert.equal(resetResponse.status, 200);
-    assert.equal(resetResponse.body.data.user.mustChangePassword, true);
-
-    // The notice email never includes the new password.
-    assert.equal(outbox.length, 1);
-    const notice = outbox[0];
-    assert.ok(notice);
-    assert.equal(notice.to, "partner@example.com");
-    assert.equal(
-      notice.subject,
-      "Tu contraseña fue restablecida - HomeKeys Liberty",
-    );
-    assert.equal(notice.html.includes("Iniciar sesión"), true);
-    assert.equal(notice.html.includes(TEST_CHANGED_PASSWORD), false);
-    assert.equal(notice.text.includes(TEST_CHANGED_PASSWORD), false);
-
-    const session = await login(
-      "partner@example.com",
-      TEST_CHANGED_PASSWORD,
-    );
-    assert.equal(session.mustChangePassword, true);
-
-    const changeResponse = await request(app)
-      .patch("/api/v1/users/me/password")
-      .set("Authorization", `Bearer ${session.token}`)
-      .send({
-        currentPassword: TEST_CHANGED_PASSWORD,
-        newPassword: TEST_ADMIN_PASSWORD,
-      });
-
-    assert.equal(changeResponse.status, 200);
-    assert.equal(changeResponse.body.data.user.mustChangePassword, false);
-  });
-
-  it("invalidates a pending invitation when an ADMIN changes the password", async () => {
+  it("sends a password reset link from the admin endpoint and invalidates the previous invitation", async () => {
     const adminToken = (
       await login("admin@example.com", TEST_ADMIN_PASSWORD)
     ).token;
@@ -280,20 +229,46 @@ describe("Invitation and forced password change HTTP integration", { concurrency
       "invitation-password@example.com",
     );
 
-    const updateResponse = await request(app)
-      .patch(`/api/v1/users/${userId}`)
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ password: TEST_CHANGED_PASSWORD });
+    const sendResponse = await request(app)
+      .post(`/api/v1/users/${userId}/send-password-reset`)
+      .set("Authorization", `Bearer ${adminToken}`);
 
-    assert.equal(updateResponse.status, 200);
-    assert.equal(database.passwordResetTokens.length, 0);
+    assert.equal(sendResponse.status, 200);
+    assert.equal(sendResponse.body.data.emailSent, true);
 
-    const resetResponse = await request(app)
+    const resetMail = outbox[outbox.length - 1];
+    assert.ok(resetMail);
+    assert.equal(resetMail.to, "invitation-password@example.com");
+    const recoveryToken = extractTokenFromMail(resetMail);
+    assert.notEqual(recoveryToken, invitationToken);
+
+    // The previous invitation link is no longer usable.
+    const oldLinkResponse = await request(app)
       .post("/api/v1/auth/reset-password")
       .send({ token: invitationToken, newPassword: TEST_ADMIN_PASSWORD });
 
-    assert.equal(resetResponse.status, 400);
-    assert.equal(resetResponse.body.code, "INVALID_RESET_TOKEN");
+    assert.equal(oldLinkResponse.status, 400);
+    assert.equal(oldLinkResponse.body.code, "INVALID_RESET_TOKEN");
+
+    // The new link lets the user define a personal password.
+    const resetResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: recoveryToken, newPassword: TEST_CHANGED_PASSWORD });
+
+    assert.equal(resetResponse.status, 200);
+
+    const session = await login(
+      "invitation-password@example.com",
+      TEST_CHANGED_PASSWORD,
+    );
+    assert.equal(session.mustChangePassword, false);
+
+    const auditLog = database.auditLogs.find(
+      (log) => log.action === "PASSWORD_RESET_LINK_SENT",
+    );
+    assert.ok(auditLog);
+    assert.equal(auditLog.actorId, 1);
+    assert.equal(auditLog.entityId, userId);
   });
 
   it("invalidates a pending invitation when an ADMIN changes the email", async () => {

@@ -8,7 +8,6 @@ import {
   renderEmailChangeNoticeEmail,
   renderInvitationEmail,
   renderPasswordResetEmail,
-  renderPasswordResetNoticeEmail,
 } from "./email-template";
 
 export interface OutgoingMailAttachment {
@@ -97,12 +96,6 @@ export interface InvitationEmailData {
   expirationHours: number;
 }
 
-export interface PasswordResetNoticeEmailData {
-  to: string;
-  firstName: string;
-  loginUrl: string;
-}
-
 export interface EmailChangeNoticeEmailData {
   to: string;
   firstName: string;
@@ -163,17 +156,6 @@ export const sendInvitationEmail = async ({
   await sendBrandedEmail(
     to,
     renderInvitationEmail({ firstName, activationUrl, expirationHours }),
-  );
-};
-
-export const sendPasswordResetNoticeEmail = async ({
-  to,
-  firstName,
-  loginUrl,
-}: PasswordResetNoticeEmailData): Promise<void> => {
-  await sendBrandedEmail(
-    to,
-    renderPasswordResetNoticeEmail({ firstName, loginUrl }),
   );
 };
 

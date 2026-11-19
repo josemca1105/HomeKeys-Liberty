@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { AuditScope } from "@prisma/client";
+import { AuditScope, type Prisma } from "@prisma/client";
 import { environment } from "../config/env";
 import {
   applyPasswordReset,
@@ -7,12 +7,17 @@ import {
   deletePendingPasswordResetTokensByUserId,
   findPasswordResetTokenByHash,
 } from "../repositories/password-reset-token-repository";
-import { findUserByEmail, findUserById } from "../repositories/user-repository";
+import { findRecentPasswordHashes } from "../repositories/password-history-repository";
+import { findUserByEmail, findUserCredentialsById } from "../repositories/user-repository";
 import type { AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { sendPasswordResetEmail } from "../utils/mailer";
 import { hashPassword } from "../utils/password";
-import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
+import {
+  assertPasswordNotBasedOnIdentity,
+  assertPasswordNotReused,
+  PASSWORD_HISTORY_LIMIT,
+} from "../utils/password-policy";
 import { hashToken } from "../utils/token";
 import { buildAuditLogData } from "./audit-service";
 
@@ -45,6 +50,15 @@ const resetTokenExpiredError = (): AppError => {
   });
 };
 
+const accountInactiveError = (): AppError => {
+  return new AppError({
+    statusCode: 403,
+    code: "ACCOUNT_INACTIVE",
+    message:
+      "Tu cuenta está desactivada. Contacta a un administrador para reactivarla.",
+  });
+};
+
 const resolveResetTokenFailure = async (token: string): Promise<AppError> => {
   const currentToken = await findPasswordResetTokenByHash(hashToken(token));
 
@@ -69,18 +83,28 @@ const resolveResetTokenFailure = async (token: string): Promise<AppError> => {
 export const issuePasswordResetToken = async (
   userId: number,
   ttlMinutes: number,
+  client?: Prisma.TransactionClient,
 ): Promise<string> => {
   const rawToken = randomBytes(RESET_TOKEN_BYTES).toString("hex");
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
-  await deletePendingPasswordResetTokensByUserId(userId);
-  await createPasswordResetToken({
-    tokenHash: hashToken(rawToken),
-    userId: userId,
-    expiresAt,
-  });
+  await deletePendingPasswordResetTokensByUserId(userId, client);
+  await createPasswordResetToken(
+    {
+      tokenHash: hashToken(rawToken),
+      userId: userId,
+      expiresAt,
+    },
+    client,
+  );
 
   return rawToken;
+};
+
+// The token travels in the URL fragment, never in the query string, so it
+// stays out of server logs, proxies and Referer headers.
+export const buildPasswordResetUrl = (rawToken: string): string => {
+  return `${environment.PASSWORD_RESET_BASE_URL}#token=${rawToken}`;
 };
 
 interface PasswordResetRecipient {
@@ -97,14 +121,11 @@ const deliverPasswordResetEmail = async (
       user.id,
       PASSWORD_RESET_TOKEN_TTL_MINUTES,
     );
-    // The token travels in the URL fragment, never in the query string, so it
-    // stays out of server logs, proxies and Referer headers.
-    const resetUrl = `${environment.PASSWORD_RESET_BASE_URL}#token=${rawToken}`;
 
     await sendPasswordResetEmail({
       to: user.email,
       firstName: user.firstName,
-      resetUrl,
+      resetUrl: buildPasswordResetUrl(rawToken),
       expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
     });
   } catch (error) {
@@ -116,6 +137,12 @@ const deliverPasswordResetEmail = async (
 
 export const requestPasswordReset = async (email: string): Promise<void> => {
   const user = await findUserByEmail(email);
+
+  // Deactivated accounts cannot sign in, so recovery links are not sent. The
+  // response stays generic, exactly as it does for unknown emails.
+  if (!user || !user.isActive) {
+    return;
+  }
 
   // The HTTP response stays generic whether the email exists or not, so this
   // silent return prevents user enumeration through the API.
@@ -153,10 +180,14 @@ export const resetUserPassword = async (
     throw resetTokenExpiredError();
   }
 
-  const user = await findUserById(tokenRecord.userId);
+  const user = await findUserCredentialsById(tokenRecord.userId);
 
   if (!user) {
     throw invalidResetTokenError();
+  }
+
+  if (!user.isActive) {
+    throw accountInactiveError();
   }
 
   assertPasswordNotBasedOnIdentity(
@@ -166,6 +197,16 @@ export const resetUserPassword = async (
       firstName: user.firstName,
       lastName: user.lastName,
     },
+    "newPassword",
+  );
+
+  const recentHashes = await findRecentPasswordHashes(
+    tokenRecord.userId,
+    PASSWORD_HISTORY_LIMIT,
+  );
+  await assertPasswordNotReused(
+    newPassword,
+    [user.passwordHash, ...recentHashes],
     "newPassword",
   );
 
@@ -193,6 +234,7 @@ export const resetUserPassword = async (
     passwordChangedAt,
     now: passwordChangedAt,
     auditLog,
+    passwordHistoryLimit: PASSWORD_HISTORY_LIMIT,
   });
 
   if (!wasApplied) {

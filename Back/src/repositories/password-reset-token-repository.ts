@@ -1,7 +1,10 @@
-import type { PasswordResetToken } from "@prisma/client";
+import type { PasswordResetToken, Prisma } from "@prisma/client";
 import { prisma } from "../config/database";
 import { createAuditLog } from "./audit-log-repository";
 import type { CreateAuditLogData } from "./audit-log-repository";
+import { recordPasswordHistoryEntry } from "./password-history-repository";
+
+type PasswordResetTokenClient = Prisma.TransactionClient | typeof prisma;
 
 export type PasswordResetTokenRecord = Pick<
   PasswordResetToken,
@@ -25,16 +28,18 @@ export const findPasswordResetTokenByHash = async (
 
 export const createPasswordResetToken = async (
   tokenData: CreatePasswordResetTokenData,
+  client: PasswordResetTokenClient = prisma,
 ): Promise<void> => {
-  await prisma.passwordResetToken.create({
+  await client.passwordResetToken.create({
     data: tokenData,
   });
 };
 
 export const deletePendingPasswordResetTokensByUserId = async (
   userId: number,
+  client: PasswordResetTokenClient = prisma,
 ): Promise<number> => {
-  const result = await prisma.passwordResetToken.deleteMany({
+  const result = await client.passwordResetToken.deleteMany({
     where: { userId, used: false },
   });
 
@@ -48,6 +53,7 @@ export interface ApplyPasswordResetData {
   passwordChangedAt: Date;
   now: Date;
   auditLog?: CreateAuditLogData;
+  passwordHistoryLimit?: number;
 }
 
 // The token is consumed with a conditional update inside the transaction so
@@ -59,6 +65,7 @@ export const applyPasswordReset = async ({
   passwordChangedAt,
   now,
   auditLog,
+  passwordHistoryLimit,
 }: ApplyPasswordResetData): Promise<boolean> => {
   return prisma.$transaction(async (transaction) => {
     const consumedToken = await transaction.passwordResetToken.updateMany({
@@ -81,6 +88,12 @@ export const applyPasswordReset = async ({
       where: { userId, used: false },
     });
 
+    const currentUser = await transaction.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    const previousPasswordHash = currentUser?.passwordHash ?? null;
+
     await transaction.user.update({
       where: { id: userId },
       data: {
@@ -89,6 +102,19 @@ export const applyPasswordReset = async ({
         mustChangePassword: false,
       },
     });
+
+    if (
+      previousPasswordHash !== null &&
+      passwordHistoryLimit !== undefined &&
+      passwordHistoryLimit > 0
+    ) {
+      await recordPasswordHistoryEntry(
+        userId,
+        previousPasswordHash,
+        passwordHistoryLimit,
+        transaction,
+      );
+    }
 
     // The audit row shares the transaction: if it fails, the token stays
     // unused and the password is not changed.

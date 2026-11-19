@@ -289,14 +289,28 @@ const run = async (): Promise<void> => {
   const reloginToken = await login(createdEmail, LIVE_CHANGED_PASSWORD);
   assert.ok(reloginToken, "The new password must work after the change");
 
-  // 5. ADMIN resets another user's password and closes that user's sessions.
+  // 5. ADMIN sends a reset link; the user defines the password and old sessions die.
+  const sendResetLinkResponse = await request(app)
+    .post(`/api/v1/users/${victimUser.id}/send-password-reset`)
+    .set("Authorization", `Bearer ${adminToken}`);
+
+  assert.equal(sendResetLinkResponse.status, 200);
+  assert.equal(sendResetLinkResponse.body.data.emailSent, true);
+
+  const resetMail = outbox[outbox.length - 1];
+  assert.ok(resetMail);
+  const resetTokenMatch = /token=([0-9a-f]{64})/.exec(resetMail.text);
+  assert.ok(resetTokenMatch);
+
   const resetResponse = await request(app)
-    .patch(`/api/v1/users/${victimUser.id}`)
-    .set("Authorization", `Bearer ${adminToken}`)
-    .send({ password: LIVE_CHANGED_PASSWORD });
+    .post("/api/v1/auth/reset-password")
+    .send({
+      token: resetTokenMatch[1],
+      newPassword: LIVE_CHANGED_PASSWORD,
+    });
 
   assert.equal(resetResponse.status, 200);
-  assert.equal("token" in resetResponse.body.data, false);
+  assertNoPasswordHash(resetResponse.body);
 
   const victimStaleResponse = await request(app)
     .get("/api/v1/users/me")
@@ -304,6 +318,40 @@ const run = async (): Promise<void> => {
 
   assert.equal(victimStaleResponse.status, 401);
   assert.equal(victimStaleResponse.body.code, "SESSION_INVALIDATED");
+
+  const victimReloginToken = await login(
+    victimUser.email,
+    LIVE_CHANGED_PASSWORD,
+  );
+  assert.ok(victimReloginToken, "The reset password must work");
+
+  // 5b. Password history is enforced against the real database.
+  const secondLinkResponse = await request(app)
+    .post(`/api/v1/users/${victimUser.id}/send-password-reset`)
+    .set("Authorization", `Bearer ${adminToken}`);
+
+  assert.equal(secondLinkResponse.status, 200);
+
+  const secondResetMail = outbox[outbox.length - 1];
+  assert.ok(secondResetMail);
+  const secondTokenMatch = /token=([0-9a-f]{64})/.exec(secondResetMail.text);
+  assert.ok(secondTokenMatch);
+
+  const reuseResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({
+      token: secondTokenMatch[1],
+      newPassword: LIVE_PARTNER_PASSWORD,
+    });
+
+  assert.equal(reuseResponse.status, 400);
+  assert.equal(reuseResponse.body.code, "VALIDATION_ERROR");
+  assert.equal(
+    reuseResponse.body.errors.some((error: { message: string }) =>
+      error.message.includes("No puedes reutilizar"),
+    ),
+    true,
+  );
 
   // 6. Deletion guards.
   const selfDeleteResponse = await request(app)

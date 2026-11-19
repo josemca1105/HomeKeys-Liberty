@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Role } from "@prisma/client";
 import type { Express } from "express";
-import bcrypt from "bcrypt";
 import request from "supertest";
 import { createApp } from "../src/app";
 import type { OutgoingMail } from "../src/utils/mailer";
@@ -10,7 +9,6 @@ import { setMailSenderForTesting } from "../src/utils/mailer";
 import {
   createMockDatabase,
   TEST_ADMIN_PASSWORD,
-  TEST_NEW_USER_PASSWORD,
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
@@ -23,7 +21,6 @@ const buildCreateUserPayload = (
     firstName: "Test",
     lastName: "User",
     email,
-    password: TEST_NEW_USER_PASSWORD,
     phone: "00000000",
     photoUrl: null,
     ...(role ? { role } : {}),
@@ -82,7 +79,7 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
     assert.equal(response.body.code, "INVALID_CREDENTIALS");
   });
 
-  it("allows an administrator to create a PARTNER with a hashed password", async () => {
+  it("allows an administrator to create a PARTNER with a generated password", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const response = await request(app)
@@ -98,10 +95,7 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
       (user) => user.email === "new-partner@example.com",
     );
     assert.ok(createdUser);
-    assert.equal(
-      await bcrypt.compare(TEST_NEW_USER_PASSWORD, createdUser.passwordHash),
-      true,
-    );
+    assert.equal(createdUser.passwordHash.startsWith("$2"), true);
     assert.equal(database.getUserCreateCallCount(), 1);
   });
 
@@ -237,21 +231,6 @@ describe("Authentication and authorization HTTP integration", { concurrency: fal
     assert.equal(firstResponse.status, 200);
     assert.equal(secondResponse.status, 200);
     assert.equal(database.revokedTokens.length, 1);
-  });
-
-  it("rejects passwords that exceed the bcrypt UTF-8 byte limit", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-    const payload = buildCreateUserPayload("long-password@example.com");
-    payload.password = "é".repeat(72);
-
-    const response = await request(app)
-      .post("/api/v1/users/add")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send(payload);
-
-    assert.equal(response.status, 400);
-    assert.equal(response.body.code, "VALIDATION_ERROR");
-    assert.equal(database.getUserCreateCallCount(), 0);
   });
 
   it("returns 413 when the JSON body exceeds the configured limit", async () => {

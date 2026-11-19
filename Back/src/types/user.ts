@@ -4,7 +4,6 @@ export interface CreateUserInput {
   firstName: string;
   lastName: string;
   email: string;
-  password?: string;
   phone: string;
   photoUrl?: string | null;
   role?: Role;
@@ -23,7 +22,6 @@ export interface UpdateUserInput {
   photoUrl?: string | null;
   role?: Role;
   isActive?: boolean;
-  password?: string;
 }
 
 // Fields a user can change about itself. Email, role, account status and
@@ -42,7 +40,6 @@ export interface ChangePasswordInput {
 
 export interface UserUpdateResult {
   user: UserResponse;
-  token: string | null;
   previousEmail: string | null;
 }
 

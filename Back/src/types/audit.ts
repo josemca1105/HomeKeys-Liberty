@@ -13,6 +13,7 @@ export type AuditAction =
   | "USER_DEACTIVATED"
   | "USER_REACTIVATED"
   | "USER_PASSWORD_RESET"
+  | "PASSWORD_RESET_LINK_SENT"
   | "USER_DELETED";
 
 export interface AuditActor {

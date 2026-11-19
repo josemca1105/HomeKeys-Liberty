@@ -54,6 +54,7 @@ export type UserCredentialsRecord = Pick<
   | "firstName"
   | "lastName"
   | "email"
+  | "isActive"
 >;
 
 export const findUserByEmail = async (
@@ -102,6 +103,7 @@ export const findUserCredentialsById = async (
       firstName: true,
       lastName: true,
       email: true,
+      isActive: true,
     },
   });
 };

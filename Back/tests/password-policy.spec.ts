@@ -80,7 +80,6 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
 
   const createUserPayload = (
     email: string,
-    password?: string,
   ): Record<string, unknown> => {
     return {
       firstName: "Test",
@@ -88,7 +87,6 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
       email,
       phone: "00000000",
       photoUrl: null,
-      ...(password !== undefined ? { password } : {}),
     };
   };
 
@@ -190,86 +188,62 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     assert.notEqual(firstToken[1], secondToken[1]);
   });
 
-  it("keeps the explicit password flow and forces a password change", async () => {
+  it("sends a password reset link from the ADMIN endpoint", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const response = await request(app)
-      .post("/api/v1/users/add")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({
-        ...createUserPayload("explicit@example.com", TEST_PARTNER_PASSWORD),
-        role: Role.ADMIN,
-      });
+      .post("/api/v1/users/2/send-password-reset")
+      .set("Authorization", `Bearer ${adminToken}`);
 
-    assert.equal(response.status, 201);
-    assert.equal("temporaryPassword" in response.body.data, false);
-    assert.equal("passwordHash" in response.body.data.user, false);
-    assert.equal(response.body.data.invitationSent, true);
-
-    // The explicit password is known only by the ADMIN: it never travels by
-    // email, while the invitation still includes the activation link.
+    assert.equal(response.status, 200);
+    assert.equal(response.body.data.emailSent, true);
     assert.equal(outbox.length, 1);
+
     const mail = outbox[0];
     assert.ok(mail);
-    assert.equal(mail.html.includes(TEST_PARTNER_PASSWORD), false);
-    assert.equal(mail.text.includes(TEST_PARTNER_PASSWORD), false);
-    assert.equal(mail.html.includes("Activar mi cuenta"), true);
+    assert.equal(mail.to, "partner@example.com");
+    assert.equal(/#token=[0-9a-f]{64}/.test(mail.text), true);
 
-    // Logging in with the ADMIN-defined password works, but the user is
-    // forced to define a personal one before using the rest of the API.
-    const sessionToken = await login(
-      "explicit@example.com",
+    const audit = database.auditLogs.find(
+      (log) => log.action === "PASSWORD_RESET_LINK_SENT",
+    );
+    assert.ok(audit);
+    assert.equal(audit.actorId, 1);
+    assert.equal(audit.entityId, 2);
+  });
+
+  it("blocks reset-link requests for inactive accounts and non-admins", async () => {
+    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
+    const partner = database.users.find((user) => user.id === 2);
+    assert.ok(partner);
+    partner.isActive = false;
+
+    const inactiveResponse = await request(app)
+      .post("/api/v1/users/2/send-password-reset")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(inactiveResponse.status, 409);
+    assert.equal(inactiveResponse.body.code, "USER_INACTIVE");
+
+    partner.isActive = true;
+    const partnerToken = await login(
+      "partner@example.com",
       TEST_PARTNER_PASSWORD,
     );
 
-    const loginResponse = await request(app)
-      .post("/api/v1/auth/login")
-      .send({
-        email: "explicit@example.com",
-        password: TEST_PARTNER_PASSWORD,
-      });
-    assert.equal(loginResponse.body.data.user.mustChangePassword, true);
+    const forbiddenResponse = await request(app)
+      .post("/api/v1/users/1/send-password-reset")
+      .set("Authorization", `Bearer ${partnerToken}`);
 
-    const blockedResponse = await request(app)
-      .get("/api/v1/users")
-      .set("Authorization", `Bearer ${sessionToken}`);
-    assert.equal(blockedResponse.status, 403);
-    assert.equal(blockedResponse.body.code, "PASSWORD_CHANGE_REQUIRED");
+    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(forbiddenResponse.body.code, "ADMIN_REQUIRED");
 
-    const changeResponse = await request(app)
-      .patch("/api/v1/users/me/password")
-      .set("Authorization", `Bearer ${sessionToken}`)
-      .send({
-        currentPassword: TEST_PARTNER_PASSWORD,
-        newPassword: TEST_CHANGED_PASSWORD,
-      });
+    const notFoundResponse = await request(app)
+      .post("/api/v1/users/999/send-password-reset")
+      .set("Authorization", `Bearer ${adminToken}`);
 
-    assert.equal(changeResponse.status, 200);
-    assert.equal(
-      changeResponse.body.data.user.mustChangePassword,
-      false,
-    );
-
-    const freshToken = changeResponse.body.data.token as string;
-    const restoredResponse = await request(app)
-      .get("/api/v1/users")
-      .set("Authorization", `Bearer ${freshToken}`);
-    assert.equal(restoredResponse.status, 200);
-  });
-
-  it("enforces the password policy on user creation", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-
-    for (const invalidCase of INVALID_PASSWORD_CASES) {
-      const response = await request(app)
-        .post("/api/v1/users/add")
-        .set("Authorization", `Bearer ${adminToken}`)
-        .send(
-          createUserPayload("invalid@example.com", invalidCase.password),
-        );
-
-      assertPasswordValidationError(response, "password", invalidCase.message);
-    }
+    assert.equal(notFoundResponse.status, 404);
+    assert.equal(notFoundResponse.body.code, "USER_NOT_FOUND");
   });
 
   it("enforces the password policy on the own-password endpoint", async () => {
@@ -298,19 +272,6 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
       .get("/api/v1/users/me")
       .set("Authorization", `Bearer ${partnerToken}`);
     assert.equal(sessionResponse.status, 200);
-  });
-
-  it("enforces the password policy on admin password resets", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-
-    for (const invalidCase of INVALID_PASSWORD_CASES) {
-      const response = await request(app)
-        .patch("/api/v1/users/2")
-        .set("Authorization", `Bearer ${adminToken}`)
-        .send({ password: invalidCase.password });
-
-      assertPasswordValidationError(response, "password", invalidCase.message);
-    }
   });
 
   it("accepts policy-compliant passwords with accents and without an artificial length cap", async () => {
@@ -367,28 +328,6 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     assert.equal(sessionResponse.body.data.user.id, 3);
   });
 
-  it("rejects passwords based on the email or the name on user creation", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-
-    const response = await request(app)
-      .post("/api/v1/users/add")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({
-        firstName: "Maria",
-        lastName: "Gonzalez",
-        email: "maria.gonzalez@example.com",
-        phone: "00000000",
-        photoUrl: null,
-        password: "MariaGonzalez2026!",
-      });
-
-    assertPasswordValidationError(
-      response,
-      "password",
-      "La contraseña no puede basarse en tu correo o en tu nombre.",
-    );
-  });
-
   it("rejects an identity-based password in the own-password flow", async () => {
     const partnerToken = await login(
       "partner@example.com",
@@ -406,21 +345,6 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     assertPasswordValidationError(
       response,
       "newPassword",
-      "La contraseña no puede basarse en tu correo o en tu nombre.",
-    );
-  });
-
-  it("rejects an identity-based password in the admin reset flow", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-
-    const response = await request(app)
-      .patch("/api/v1/users/2")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ password: "Partner20262026!" });
-
-    assertPasswordValidationError(
-      response,
-      "password",
       "La contraseña no puede basarse en tu correo o en tu nombre.",
     );
   });

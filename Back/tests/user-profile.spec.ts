@@ -341,58 +341,39 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(response.body.data.user.email, "moved@example.com");
   });
 
-  it("notifies both addresses when the email and the password change together", async () => {
-    const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
-
-    const response = await request(app)
-      .patch("/api/v1/users/2")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({
-        email: "new-partner@example.com",
-        password: TEST_CHANGED_PASSWORD,
-      });
-
-    assert.equal(response.status, 200);
-    assert.equal(outbox.length, 2);
-
-    const passwordNotice = outbox.find(
-      (mail) => mail.to === "new-partner@example.com",
-    );
-    const emailNotice = outbox.find(
-      (mail) => mail.to === "partner@example.com",
-    );
-
-    assert.ok(passwordNotice);
-    assert.ok(emailNotice);
-    assert.equal(
-      passwordNotice.subject,
-      "Tu contraseña fue restablecida - HomeKeys Liberty",
-    );
-    assert.equal(
-      emailNotice.subject,
-      "Tu correo de acceso cambió - HomeKeys Liberty",
-    );
-  });
-
-  it("allows ADMIN to reset another user's password and closes that user's sessions", async () => {
+  it("allows ADMIN to send a password reset link and the reset closes previous sessions", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
     const partnerToken = await login(
       "partner@example.com",
       TEST_PARTNER_PASSWORD,
     );
 
-    const response = await request(app)
-      .patch("/api/v1/users/2")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ password: TEST_CHANGED_PASSWORD });
+    const sendResponse = await request(app)
+      .post("/api/v1/users/2/send-password-reset")
+      .set("Authorization", `Bearer ${adminToken}`);
 
-    assert.equal(response.status, 200);
-    assert.equal(response.body.message, "Usuario actualizado exitosamente.");
-    assert.equal(response.body.data.user.id, 2);
-    assert.equal("passwordHash" in response.body.data.user, false);
-    assert.equal("token" in response.body.data, false);
+    assert.equal(sendResponse.status, 200);
+    assert.equal(sendResponse.body.data.emailSent, true);
     assert.equal(outbox.length, 1);
     assert.equal(outbox[0]?.to, "partner@example.com");
+
+    // Sending the link does not close sessions by itself.
+    const stillValidSession = await request(app)
+      .get("/api/v1/users/me")
+      .set("Authorization", `Bearer ${partnerToken}`);
+    assert.equal(stillValidSession.status, 200);
+
+    const tokenMatch = /#token=([0-9a-f]{64})/.exec(outbox[0]?.text ?? "");
+    assert.ok(tokenMatch);
+
+    const resetResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({
+        token: tokenMatch[1] as string,
+        newPassword: TEST_CHANGED_PASSWORD,
+      });
+
+    assert.equal(resetResponse.status, 200);
 
     const invalidatedResponse = await request(app)
       .get("/api/v1/users/me")
@@ -416,7 +397,7 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal("passwordHash" in newPasswordResponse.body.data.user, false);
   });
 
-  it("returns a fresh token when ADMIN resets its own password through /users/:id", async () => {
+  it("rejects the password field on PATCH /users/:id", async () => {
     const adminToken = await login("admin@example.com", TEST_ADMIN_PASSWORD);
 
     const response = await request(app)
@@ -424,17 +405,8 @@ describe("User management HTTP integration", { concurrency: false }, () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ password: TEST_CHANGED_PASSWORD });
 
-    assert.equal(response.status, 200);
-    assert.equal(response.body.data.user.id, 1);
-    assert.equal(typeof response.body.data.token, "string");
-    assert.equal(outbox.length, 1);
-    assert.equal(outbox[0]?.to, "admin@example.com");
-
-    const freshSessionResponse = await request(app)
-      .get("/api/v1/users/me")
-      .set("Authorization", `Bearer ${response.body.data.token as string}`);
-
-    assert.equal(freshSessionResponse.status, 200);
+    assert.equal(response.status, 400);
+    assert.equal(response.body.code, "VALIDATION_ERROR");
   });
 
   it("blocks PARTNER from using PATCH /users/:id", async () => {
@@ -458,33 +430,6 @@ describe("User management HTTP integration", { concurrency: false }, () => {
       .set("Authorization", `Bearer ${partnerToken}`);
 
     assert.equal(meResponse.body.data.user.firstName, "Test");
-  });
-
-  it("blocks PARTNER from changing another user's password", async () => {
-    const partnerToken = await login(
-      "partner@example.com",
-      TEST_PARTNER_PASSWORD,
-    );
-
-    const response = await request(app)
-      .patch("/api/v1/users/1")
-      .set("Authorization", `Bearer ${partnerToken}`)
-      .send({ password: TEST_CHANGED_PASSWORD });
-
-    assert.equal(response.status, 403);
-    assert.equal(response.body.code, "ADMIN_REQUIRED");
-
-    const targetedResponse = await request(app)
-      .patch("/api/v1/users/me/password")
-      .set("Authorization", `Bearer ${partnerToken}`)
-      .send({
-        currentPassword: TEST_PARTNER_PASSWORD,
-        newPassword: TEST_CHANGED_PASSWORD,
-        userId: 1,
-      });
-
-    assert.equal(targetedResponse.status, 400);
-    assert.equal(targetedResponse.body.code, "VALIDATION_ERROR");
   });
 
   it("allows PARTNER to change its own password and invalidates previous sessions", async () => {

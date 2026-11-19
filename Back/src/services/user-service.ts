@@ -18,8 +18,14 @@ import {
 import { runSerializableTransaction } from "../repositories/serializable-transaction";
 import {
   INVITATION_TOKEN_TTL_MINUTES,
+  PASSWORD_RESET_TOKEN_TTL_MINUTES,
+  buildPasswordResetUrl,
   issuePasswordResetToken,
 } from "../services/password-reset-service";
+import {
+  findRecentPasswordHashes,
+  recordPasswordHistoryEntry,
+} from "../repositories/password-history-repository";
 import type {
   ChangePasswordInput,
   CreateUserInput,
@@ -38,14 +44,18 @@ import { generateAuthToken } from "../utils/jwt";
 import {
   sendEmailChangeNoticeEmail,
   sendInvitationEmail,
-  sendPasswordResetNoticeEmail,
+  sendPasswordResetEmail,
 } from "../utils/mailer";
 import {
   comparePassword,
   generateTemporaryPassword,
   hashPassword,
 } from "../utils/password";
-import { assertPasswordNotBasedOnIdentity } from "../utils/password-policy";
+import {
+  assertPasswordNotBasedOnIdentity,
+  assertPasswordNotReused,
+  PASSWORD_HISTORY_LIMIT,
+} from "../utils/password-policy";
 import { toUserResponse } from "../utils/user-response";
 import { recordAuditEventInTransaction } from "./audit-service";
 
@@ -94,6 +104,15 @@ const selfDeactivationNotAllowedError = (): AppError => {
     statusCode: 409,
     code: "SELF_DEACTIVATION_NOT_ALLOWED",
     message: "No puedes desactivar tu propia cuenta.",
+  });
+};
+
+const userInactiveError = (): AppError => {
+  return new AppError({
+    statusCode: 409,
+    code: "USER_INACTIVE",
+    message:
+      "La cuenta está desactivada. Reactívala antes de enviar un enlace de restablecimiento.",
   });
 };
 
@@ -222,20 +241,9 @@ export const registerUser = async (
   }
 
   // The initial password is never disclosed: the account is activated through
-  // the invitation link sent to the new user's email.
-  const initialPassword = input.password ?? generateTemporaryPassword();
-
-  if (input.password !== undefined) {
-    assertPasswordNotBasedOnIdentity(
-      input.password,
-      {
-        email: input.email,
-        firstName: input.firstName,
-        lastName: input.lastName,
-      },
-      "password",
-    );
-  }
+  // the invitation link sent to the new user's email. Only the user defines a
+  // password, so an administrator never knows any account credential.
+  const initialPassword = generateTemporaryPassword();
 
   const passwordHash = await hashPassword(initialPassword);
 
@@ -319,7 +327,18 @@ export const changeOwnPassword = async (
     "newPassword",
   );
 
+  const recentHashes = await findRecentPasswordHashes(
+    userId,
+    PASSWORD_HISTORY_LIMIT,
+  );
+  await assertPasswordNotReused(
+    input.newPassword,
+    [user.passwordHash, ...recentHashes],
+    "newPassword",
+  );
+
   const newPasswordHash = await hashPassword(input.newPassword);
+  const previousPasswordHash = user.passwordHash;
 
   const updatedUser = await prisma.$transaction(async (transaction) => {
     const updatedRecord = await updateUserAndInvalidateResetTokens(
@@ -329,6 +348,13 @@ export const changeOwnPassword = async (
         passwordChangedAt: passwordChangeTimestamp(),
         mustChangePassword: false,
       },
+      transaction,
+    );
+
+    await recordPasswordHistoryEntry(
+      userId,
+      previousPasswordHash,
+      PASSWORD_HISTORY_LIMIT,
       transaction,
     );
 
@@ -429,22 +455,6 @@ export const updateUserByAdmin = async (
     }
   }
 
-  if (input.password !== undefined) {
-    assertPasswordNotBasedOnIdentity(
-      input.password,
-      {
-        email: input.email ?? currentTarget.email,
-        firstName: input.firstName ?? currentTarget.firstName,
-        lastName: input.lastName ?? currentTarget.lastName,
-      },
-      "password",
-    );
-  }
-
-  const isChangingPassword = input.password !== undefined;
-  const passwordHash =
-    input.password !== undefined ? await hashPassword(input.password) : null;
-
   try {
     const updatedUser = await runSerializableTransaction(
       async (transaction) => {
@@ -508,14 +518,8 @@ export const updateUserByAdmin = async (
           updateData.passwordChangedAt = passwordChangeTimestamp();
         }
 
-        if (passwordHash !== null) {
-          updateData.passwordHash = passwordHash;
-          updateData.passwordChangedAt = passwordChangeTimestamp();
-          updateData.mustChangePassword = true;
-        }
-
         const shouldInvalidateResetTokens =
-          isChangingPassword || isChangingEmail || isDeactivating;
+          isChangingEmail || isDeactivating;
 
         const updatedRecord = shouldInvalidateResetTokens
           ? await updateUserAndInvalidateResetTokens(
@@ -525,13 +529,11 @@ export const updateUserByAdmin = async (
             )
           : await updateUserRecord(targetUserId, updateData, transaction);
 
-        const auditAction: AuditAction = isChangingPassword
-          ? "USER_PASSWORD_RESET"
-          : isDeactivating
-            ? "USER_DEACTIVATED"
-            : isReactivating
-              ? "USER_REACTIVATED"
-              : "USER_UPDATED";
+        const auditAction: AuditAction = isDeactivating
+          ? "USER_DEACTIVATED"
+          : isReactivating
+            ? "USER_REACTIVATED"
+            : "USER_UPDATED";
 
         await recordAuditEventInTransaction(transaction, {
           scope: AuditScope.SECURITY,
@@ -540,8 +542,7 @@ export const updateUserByAdmin = async (
           entityType: "USER",
           entityId: updatedRecord.id,
           changes: {
-            fields: Object.keys(input).filter((field) => field !== "password"),
-            passwordChanged: isChangingPassword,
+            fields: Object.keys(input),
             email: updatedRecord.email,
             role: updatedRecord.role,
             isActive: updatedRecord.isActive,
@@ -553,21 +554,6 @@ export const updateUserByAdmin = async (
         return updatedRecord;
       },
     );
-
-    const isOwnPasswordChange =
-      isChangingPassword && targetUserId === actingUserId;
-
-    if (isChangingPassword) {
-      try {
-        await sendPasswordResetNoticeEmail({
-          to: updatedUser.email,
-          firstName: updatedUser.firstName,
-          loginUrl: environment.APP_BASE_URL,
-        });
-      } catch (error) {
-        console.error("Failed to send the password reset notice email.", error);
-      }
-    }
 
     if (previousEmail !== null) {
       // The notice goes to the previous address so its owner can react if the
@@ -585,9 +571,6 @@ export const updateUserByAdmin = async (
 
     return {
       user: toUserResponse(updatedUser),
-      token: isOwnPasswordChange
-        ? generateAuthToken(updatedUser.id, updatedUser.role)
-        : null,
       previousEmail,
     };
   } catch (error) {
@@ -680,4 +663,57 @@ export const deleteUserByAdmin = async (
 
     throw error;
   }
+};
+
+/**
+ * Sends a single-use password reset link to a user. The administrator never
+ * sees or sets the password. Token issuance and the audit event share one
+ * transaction; the SMTP delivery stays best-effort and is reported back.
+ */
+export const sendPasswordResetLinkByAdmin = async (
+  targetUserId: number,
+  auditContext: AuditContext,
+): Promise<{ emailSent: boolean }> => {
+  const user = await findUserById(targetUserId);
+
+  if (!user) {
+    throw userNotFoundError("enviar el enlace de restablecimiento a");
+  }
+
+  if (!user.isActive) {
+    throw userInactiveError();
+  }
+
+  const rawToken = await prisma.$transaction(async (transaction) => {
+    const issuedToken = await issuePasswordResetToken(
+      targetUserId,
+      PASSWORD_RESET_TOKEN_TTL_MINUTES,
+      transaction,
+    );
+
+    await recordAuditEventInTransaction(transaction, {
+      scope: AuditScope.SECURITY,
+      action: "PASSWORD_RESET_LINK_SENT",
+      actor: auditContext.actor,
+      entityType: "USER",
+      entityId: targetUserId,
+      request: auditContext.request,
+    });
+
+    return issuedToken;
+  });
+
+  try {
+    await sendPasswordResetEmail({
+      to: user.email,
+      firstName: user.firstName,
+      resetUrl: buildPasswordResetUrl(rawToken),
+      expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
+    });
+  } catch (error) {
+    console.error("Failed to send the admin password reset email.", error);
+    return { emailSent: false };
+  }
+
+  return { emailSent: true };
 };

@@ -181,9 +181,9 @@ paths:
       tags: [Users]
       summary: Create a user
       description: |
-        ADMIN only. The optional password is never disclosed. When omitted, the
-        API generates an internal password and the user activates the account
-        through the invitation link.
+        ADMIN only. The administrator never sets or knows the password. The API
+        generates an internal credential and sends a single-use invitation link;
+        the user defines their own password when activating the account.
       requestBody:
         required: true
         content:
@@ -415,6 +415,43 @@ paths:
             Self-deletion (`SELF_DELETION_NOT_ALLOWED`), last active ADMIN
             (`LAST_ADMIN_REQUIRED`) or user with properties
             (`USER_HAS_PROPERTIES`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_ADMIN_ACTIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/{id}/send-password-reset:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      summary: Send a password reset link
+      description: |
+        ADMIN only. Issues a single-use recovery link and sends it to the user's
+        email. The administrator never sees or sets the password. Deactivated
+        accounts are rejected; reactivate them first.
+      responses:
+        "200":
+          description: Link issued. `data.emailSent` reports whether SMTP accepted the message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetLinkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The account is deactivated (`USER_INACTIVE`).
           content:
             application/json:
               schema:
@@ -750,11 +787,6 @@ components:
           type: string
           format: email
           maxLength: 255
-        password:
-          type: string
-          minLength: 12
-          maxLength: 72
-          description: Optional. Must satisfy the password policy and must not be based on the email or name.
         phone:
           type: string
           minLength: 6
@@ -794,10 +826,6 @@ components:
           $ref: "#/components/schemas/Role"
         isActive:
           type: boolean
-        password:
-          type: string
-          minLength: 12
-          maxLength: 72
     UpdateOwnProfileRequest:
       type: object
       additionalProperties: false
@@ -973,6 +1001,18 @@ components:
               properties:
                 deletedId:
                   type: integer
+    PasswordResetLinkResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [emailSent]
+              properties:
+                emailSent:
+                  type: boolean
     UserListResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessBase"

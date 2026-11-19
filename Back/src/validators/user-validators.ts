@@ -83,10 +83,6 @@ export const createUserSchema = z.strictObject(
     firstName: createPersonNameSchema("nombre"),
     lastName: createPersonNameSchema("apellido"),
     email: emailSchema,
-    password: createPasswordSchema(
-      "La contraseña es obligatoria.",
-      "La contraseña debe ser un texto.",
-    ).optional(),
     phone: phoneSchema,
     photoUrl: photoUrlSchema,
     role: roleSchema.optional(),
@@ -132,10 +128,6 @@ export const updateUserSchema = z
           error: "El estado de la cuenta debe ser verdadero o falso.",
         })
         .optional(),
-      password: createPasswordSchema(
-        "La contraseña es obligatoria.",
-        "La contraseña debe ser un texto.",
-      ).optional(),
     },
     { error: strictObjectError },
   )

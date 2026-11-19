@@ -220,35 +220,6 @@ export const renderInvitationEmail = (
   return { subject, ...rendered };
 };
 
-export interface PasswordResetNoticeEmailContent {
-  firstName: string;
-  loginUrl: string;
-}
-
-export const renderPasswordResetNoticeEmail = (
-  content: PasswordResetNoticeEmailContent,
-): RenderedEmail & { subject: string } => {
-  const subject = "Tu contraseña fue restablecida - HomeKeys Liberty";
-  const rendered = renderEmailLayout({
-    heading: "Tu contraseña fue restablecida",
-    greeting: `Hola ${content.firstName},`,
-    paragraphs: [
-      "Un administrador restableció la contraseña de tu cuenta en HomeKeys Liberty.",
-      "Por seguridad, deberás definir una contraseña nueva en tu próximo inicio de sesión antes de continuar usando el sistema.",
-    ],
-    action: {
-      label: "Iniciar sesión",
-      url: content.loginUrl,
-      fallbackLabel:
-        "Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:",
-    },
-    notice:
-      "Si no esperabas este cambio, contacta de inmediato a tu administrador.",
-  });
-
-  return { subject, ...rendered };
-};
-
 export interface EmailChangeNoticeEmailContent {
   firstName: string;
   loginUrl: string;

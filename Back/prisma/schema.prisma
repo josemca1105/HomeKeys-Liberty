@@ -79,6 +79,7 @@ model User {
   properties          Property[]
   revokedTokens       RevokedToken[]
   passwordResetTokens PasswordResetToken[]
+  passwordHistory     PasswordHistory[]
 
   @@index([createdAt, id])
   @@map("users")
@@ -159,6 +160,20 @@ model PasswordResetToken {
   @@index([expiresAt])
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Previous password hashes used to reject reuse of the last N passwords. Rows
+// are pruned after every password change and deleted with the user.
+model PasswordHistory {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_history")
 }
 
 // Persistent brute-force protection keyed by the submitted email, including
