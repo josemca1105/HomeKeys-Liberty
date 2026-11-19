@@ -216,17 +216,39 @@ const run = async (): Promise<void> => {
   createdUserIds.push(createdUserId);
   assert.equal(createResponse.body.data.user.email, createdEmail);
 
-  // The activation link defines the initial personal password.
+  // The activation link defines the initial personal password. Resending the
+  // invitation must invalidate the original link first.
   const invitationMail = outbox[outbox.length - 1];
   assert.ok(invitationMail);
-  const activationTokenMatch = /token=([0-9a-f]{64})/.exec(
-    invitationMail.text,
-  );
-  assert.ok(activationTokenMatch);
+  const originalTokenMatch = /token=([0-9a-f]{64})/.exec(invitationMail.text);
+  assert.ok(originalTokenMatch);
+
+  const resendResponse = await request(app)
+    .post(`/api/v1/users/${createdUserId}/resend-invitation`)
+    .set("Authorization", `Bearer ${adminToken}`);
+
+  assert.equal(resendResponse.status, 200);
+  assert.equal(resendResponse.body.data.emailSent, true);
+
+  const resentMail = outbox[outbox.length - 1];
+  assert.ok(resentMail);
+  const resentTokenMatch = /token=([0-9a-f]{64})/.exec(resentMail.text);
+  assert.ok(resentTokenMatch);
+
+  const originalLinkResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({
+      token: originalTokenMatch[1],
+      newPassword: LIVE_PARTNER_PASSWORD,
+    });
+
+  assert.equal(originalLinkResponse.status, 400);
+  assert.equal(originalLinkResponse.body.code, "INVALID_RESET_TOKEN");
+
   const activationResponse = await request(app)
     .post("/api/v1/auth/reset-password")
     .send({
-      token: activationTokenMatch[1],
+      token: resentTokenMatch[1],
       newPassword: LIVE_PARTNER_PASSWORD,
     });
   assert.equal(activationResponse.status, 200);

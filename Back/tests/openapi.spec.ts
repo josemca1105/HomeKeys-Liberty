@@ -32,6 +32,7 @@ const EXPECTED_PATHS = [
   "/api/v1/users/me/password",
   "/api/v1/users/{id}",
   "/api/v1/users/{id}/send-password-reset",
+  "/api/v1/users/{id}/resend-invitation",
   "/api/v1/audit-logs",
 ];
 

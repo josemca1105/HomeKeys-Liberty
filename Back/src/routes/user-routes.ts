@@ -6,6 +6,7 @@ import {
   getUserById,
   getUsers,
   removeUser,
+  resendInvitation,
   sendPasswordResetLink,
   updateMyProfile,
   updateUser,
@@ -75,6 +76,16 @@ userRoutes.post(
   userManagementRateLimiter,
   validateParams(userIdParamsSchema),
   sendPasswordResetLink,
+);
+
+userRoutes.post(
+  "/:id/resend-invitation",
+  authenticate,
+  enforcePasswordChange,
+  isAdmin,
+  userManagementRateLimiter,
+  validateParams(userIdParamsSchema),
+  resendInvitation,
 );
 
 userRoutes.patch(

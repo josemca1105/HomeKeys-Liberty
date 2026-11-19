@@ -4,6 +4,7 @@ import {
   getUserProfile,
   listUsers,
   registerUser,
+  resendInvitationByAdmin,
   sendPasswordResetLinkByAdmin,
   updateOwnProfile,
   updateUserByAdmin,
@@ -130,6 +131,23 @@ export const sendPasswordResetLink = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Enlace de restablecimiento enviado.",
+      data: { emailSent },
+    });
+  },
+);
+
+export const resendInvitation = asyncHandler(
+  async (req, res): Promise<void> => {
+    const session = requireSession(req);
+    const userId = (req.validatedParams as UserIdParams).id;
+    const { emailSent } = await resendInvitationByAdmin(userId, {
+      actor: getAuditActor(session),
+      request: getAuditRequestContext(req),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Invitación reenviada.",
       data: { emailSent },
     });
   },

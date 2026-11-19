@@ -248,3 +248,49 @@ export const renderEmailChangeNoticeEmail = (
 
   return { subject, ...rendered };
 };
+
+export interface AccountStatusNoticeEmailContent {
+  firstName: string;
+  isActive: boolean;
+  loginUrl: string;
+}
+
+export const renderAccountStatusNoticeEmail = (
+  content: AccountStatusNoticeEmailContent,
+): RenderedEmail & { subject: string } => {
+  if (content.isActive) {
+    const subject = "Tu cuenta fue reactivada - HomeKeys Liberty";
+    const rendered = renderEmailLayout({
+      heading: "Tu cuenta fue reactivada",
+      greeting: `Hola ${content.firstName},`,
+      paragraphs: [
+        "Un administrador reactivó tu cuenta en HomeKeys Liberty.",
+        "Ya puedes iniciar sesión nuevamente. Por seguridad, las sesiones anteriores dejaron de ser válidas.",
+      ],
+      action: {
+        label: "Iniciar sesión",
+        url: content.loginUrl,
+        fallbackLabel:
+          "Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:",
+      },
+      notice:
+        "Si no reconoces este cambio, contacta de inmediato a un administrador.",
+    });
+
+    return { subject, ...rendered };
+  }
+
+  const subject = "Tu cuenta fue desactivada - HomeKeys Liberty";
+  const rendered = renderEmailLayout({
+    heading: "Tu cuenta fue desactivada",
+    greeting: `Hola ${content.firstName},`,
+    paragraphs: [
+      "Un administrador desactivó tu cuenta en HomeKeys Liberty.",
+      "Mientras la cuenta esté desactivada no podrás iniciar sesión ni usar la aplicación. Si crees que es un error, contacta a un administrador.",
+    ],
+    notice:
+      "Si no reconoces este cambio, contacta de inmediato a un administrador.",
+  });
+
+  return { subject, ...rendered };
+};

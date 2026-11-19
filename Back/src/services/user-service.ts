@@ -42,6 +42,7 @@ import type { AuditAction, AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
 import {
+  sendAccountStatusNoticeEmail,
   sendEmailChangeNoticeEmail,
   sendInvitationEmail,
   sendPasswordResetEmail,
@@ -113,6 +114,15 @@ const userInactiveError = (): AppError => {
     code: "USER_INACTIVE",
     message:
       "La cuenta está desactivada. Reactívala antes de enviar un enlace de restablecimiento.",
+  });
+};
+
+const invitationNotPendingError = (): AppError => {
+  return new AppError({
+    statusCode: 409,
+    code: "INVITATION_NOT_PENDING",
+    message:
+      "La cuenta ya fue activada. Usa el enlace de restablecimiento de contraseña si necesitas cambiarla.",
   });
 };
 
@@ -456,7 +466,7 @@ export const updateUserByAdmin = async (
   }
 
   try {
-    const updatedUser = await runSerializableTransaction(
+    const transactionResult = await runSerializableTransaction(
       async (transaction) => {
         const targetUser = await findUserById(targetUserId, transaction);
 
@@ -535,6 +545,12 @@ export const updateUserByAdmin = async (
             ? "USER_REACTIVATED"
             : "USER_UPDATED";
 
+        const statusChange = isDeactivating
+          ? ("deactivated" as const)
+          : isReactivating
+            ? ("reactivated" as const)
+            : null;
+
         await recordAuditEventInTransaction(transaction, {
           scope: AuditScope.SECURITY,
           action: auditAction,
@@ -551,9 +567,11 @@ export const updateUserByAdmin = async (
           request: auditContext.request,
         });
 
-        return updatedRecord;
+        return { updatedRecord, statusChange };
       },
     );
+
+    const updatedUser = transactionResult.updatedRecord;
 
     if (previousEmail !== null) {
       // The notice goes to the previous address so its owner can react if the
@@ -566,6 +584,19 @@ export const updateUserByAdmin = async (
         });
       } catch (error) {
         console.error("Failed to send the email change notice email.", error);
+      }
+    }
+
+    if (transactionResult.statusChange !== null) {
+      try {
+        await sendAccountStatusNoticeEmail({
+          to: updatedUser.email,
+          firstName: updatedUser.firstName,
+          isActive: transactionResult.statusChange === "reactivated",
+          loginUrl: environment.APP_BASE_URL,
+        });
+      } catch (error) {
+        console.error("Failed to send the account status notice email.", error);
       }
     }
 
@@ -712,6 +743,64 @@ export const sendPasswordResetLinkByAdmin = async (
     });
   } catch (error) {
     console.error("Failed to send the admin password reset email.", error);
+    return { emailSent: false };
+  }
+
+  return { emailSent: true };
+};
+
+/**
+ * Reissues the 24-hour activation link for an invited account. The account must
+ * still be pending activation (`mustChangePassword: true`) and active. Token
+ * issuance and the audit event share one transaction; delivery is reported
+ * back through `emailSent`.
+ */
+export const resendInvitationByAdmin = async (
+  targetUserId: number,
+  auditContext: AuditContext,
+): Promise<{ emailSent: boolean }> => {
+  const user = await findUserById(targetUserId);
+
+  if (!user) {
+    throw userNotFoundError("reenviar la invitación a");
+  }
+
+  if (!user.isActive) {
+    throw userInactiveError();
+  }
+
+  if (!user.mustChangePassword) {
+    throw invitationNotPendingError();
+  }
+
+  const rawToken = await prisma.$transaction(async (transaction) => {
+    const issuedToken = await issuePasswordResetToken(
+      targetUserId,
+      INVITATION_TOKEN_TTL_MINUTES,
+      transaction,
+    );
+
+    await recordAuditEventInTransaction(transaction, {
+      scope: AuditScope.SECURITY,
+      action: "INVITATION_RESENT",
+      actor: auditContext.actor,
+      entityType: "USER",
+      entityId: targetUserId,
+      request: auditContext.request,
+    });
+
+    return issuedToken;
+  });
+
+  try {
+    await sendInvitationEmail({
+      to: user.email,
+      firstName: user.firstName,
+      activationUrl: buildPasswordResetUrl(rawToken),
+      expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
+    });
+  } catch (error) {
+    console.error("Failed to resend the invitation email.", error);
     return { emailSent: false };
   }
 

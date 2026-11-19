@@ -17,13 +17,16 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
   let app: Express;
   let database: MockDatabase;
   let adminToken: string;
+  let outbox: OutgoingMail[];
 
   beforeEach(async () => {
     database = createMockDatabase();
     app = createApp();
+    outbox = [];
 
     setMailSenderForTesting({
       sendMail: async (options: OutgoingMail): Promise<unknown> => {
+        outbox.push(options);
         return { accepted: [options.to] };
       },
     });
@@ -61,6 +64,16 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.body.data.user.isActive, false);
+
+    assert.equal(outbox.length, 1);
+    const notice = outbox[0];
+    assert.ok(notice);
+    assert.equal(notice.to, "partner@example.com");
+    assert.equal(
+      notice.subject,
+      "Tu cuenta fue desactivada - HomeKeys Liberty",
+    );
+    assert.equal(notice.text.includes("desactivó tu cuenta"), true);
 
     const sessionResponse = await request(app)
       .get("/api/v1/users/me")
@@ -103,6 +116,17 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
 
     assert.equal(reactivationResponse.status, 200);
     assert.equal(reactivationResponse.body.data.user.isActive, true);
+
+    assert.equal(outbox.length, 2);
+    assert.equal(
+      outbox[0]?.subject,
+      "Tu cuenta fue desactivada - HomeKeys Liberty",
+    );
+    assert.equal(
+      outbox[1]?.subject,
+      "Tu cuenta fue reactivada - HomeKeys Liberty",
+    );
+    assert.equal(outbox[1]?.text.includes("reactivó tu cuenta"), true);
 
     const oldSessionResponse = await request(app)
       .get("/api/v1/users/me")
@@ -212,5 +236,28 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.data.user.isActive, true);
     assert.equal("passwordHash" in response.body.data.user, false);
+  });
+
+  it("does not send a status notice for regular updates", async () => {
+    const response = await request(app)
+      .patch("/api/v1/users/2")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ phone: "04120000009" });
+
+    assert.equal(response.status, 200);
+    assert.equal(outbox.length, 0);
+  });
+
+  it("keeps the update when the status notice cannot be delivered", async () => {
+    setMailSenderForTesting({
+      sendMail: async (): Promise<unknown> => {
+        throw new Error("SMTP unavailable");
+      },
+    });
+
+    const response = await deactivate(2);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.data.user.isActive, false);
   });
 });

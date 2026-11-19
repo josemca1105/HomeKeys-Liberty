@@ -373,7 +373,7 @@ The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR` inst
 
 The optional `photoUrl` must be an absolute `http` or `https` URL without embedded credentials. `javascript:`, `data:`, `ftp:` and literal localhost, private, link-local or internal hosts are rejected.
 
-Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend a link with `POST /users/:id/send-password-reset`.
+Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend the invitation with `POST /users/:id/resend-invitation`.
 
 To create another administrator, add:
 
@@ -494,7 +494,7 @@ Validation rules:
 - `photoUrl` must be an absolute `http` or `https` URL without embedded credentials; `null` clears it. Literal localhost, private, link-local and internal hosts are rejected.
 - `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address, and sends a notice to the previous address. The notice never includes the new address, so a compromised old mailbox cannot learn where the account moved; delivery is best-effort and never fails the update.
 - `role` accepts only `ADMIN` or `PARTNER`.
-- `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, and deletes pending invitation or recovery links. Reactivation invalidates every session issued before the deactivation, so users must sign in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
+- `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, deletes pending invitation or recovery links, and emails a deactivation notice to the user. Reactivation invalidates every session issued before the deactivation, emails a reactivation notice, and requires signing in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
 - Demoting or deactivating the last active `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; inactive administrators do not count. An `ADMIN` can demote itself whenever another active `ADMIN` remains. The check and the update run in the same serializable transaction, so concurrent changes cannot leave the system without active administrators.
 
 Passwords are never set through this endpoint. To let a user define a new password, use `POST /users/:id/send-password-reset`.
@@ -510,6 +510,21 @@ Possible responses:
 - `409 EMAIL_ALREADY_REGISTERED`: the new email belongs to another user.
 - `409 LAST_ADMIN_REQUIRED`: the change would leave the system without active administrators.
 - `409 SELF_DEACTIVATION_NOT_ALLOWED`: the target is the authenticated administrator and `isActive` is `false`.
+
+### Resend an invitation
+
+```text
+POST /api/v1/users/:id/resend-invitation
+Authorization: Bearer <token>
+```
+
+Only `ADMIN` users can access this endpoint. It reissues the 24-hour activation link for an account that has not been activated yet (`mustChangePassword: true`). Any previously pending invitation or recovery link is replaced, and the audit log records `INVITATION_RESENT` in the same transaction as the token issuance.
+
+Rules:
+
+- Activated accounts are rejected with `409 INVITATION_NOT_PENDING`; use `POST /users/:id/send-password-reset` instead.
+- Deactivated accounts are rejected with `409 USER_INACTIVE`; reactivate the account first.
+- The response reports `data.emailSent`: `false` means the token was issued but SMTP delivery failed.
 
 ### Send a password reset link
 
@@ -761,7 +776,7 @@ Errors use a consistent structure:
 
 Unexpected errors return a generic Spanish message without exposing SQL queries, stack traces, tokens, or credentials.
 
-User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `USER_INACTIVE`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
+User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `USER_INACTIVE`, `INVITATION_NOT_PENDING`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
 
 ## Postman collection
 
@@ -973,7 +988,7 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Temporary passwords are generated with `node:crypto` randomness, include at least one character of every policy class, exclude ambiguous characters (`0/O/l/1`), are never disclosed (the user defines their own through the invitation link), and are stored only as bcrypt hashes.
 - The password policy applies only to newly defined passwords; existing passwords are never forced to rotate.
 - Changing a password invalidates every previously issued session. JWTs carry an `issuedAtMs` claim with millisecond precision that is compared against `users.password_changed_at` during authentication. Responses that change the caller's own password include a fresh `data.token` so the current session continues while older sessions stop working immediately.
-- Deactivating an account blocks login and every existing session immediately (`403 ACCOUNT_INACTIVE`), without deleting the user, their properties or their audit history. Reactivation clears the block but invalidates sessions issued before the deactivation, so the user must sign in again.
+- Deactivating an account blocks login and every existing session immediately (`403 ACCOUNT_INACTIVE`), without deleting the user, their properties or their audit history. Reactivation clears the block but invalidates sessions issued before the deactivation, so the user must sign in again. Both transitions email a notice to the account address; delivery is best-effort and never blocks the administrative change.
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account. An email change also notifies the previous address without revealing the new one.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction. Database foreign keys also cascade those rows if a user is deleted outside the API.

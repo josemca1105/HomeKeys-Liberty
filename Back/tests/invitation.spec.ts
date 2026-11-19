@@ -271,6 +271,110 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     assert.equal(auditLog.entityId, userId);
   });
 
+  it("resends the invitation and invalidates the previous activation link", async () => {
+    const adminToken = (
+      await login("admin@example.com", TEST_ADMIN_PASSWORD)
+    ).token;
+    const { userId, invitationToken } = await createInvitedUser(
+      adminToken,
+      "resend-invitation@example.com",
+    );
+
+    const response = await request(app)
+      .post(`/api/v1/users/${userId}/resend-invitation`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.message, "Invitación reenviada.");
+    assert.equal(response.body.data.emailSent, true);
+
+    const resentMail = outbox[outbox.length - 1];
+    assert.ok(resentMail);
+    assert.equal(resentMail.to, "resend-invitation@example.com");
+    assert.equal(
+      resentMail.subject,
+      "Bienvenido a HomeKeys Liberty - Activa tu cuenta",
+    );
+    const resentToken = extractTokenFromMail(resentMail);
+    assert.notEqual(resentToken, invitationToken);
+
+    const oldLinkResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: invitationToken, newPassword: TEST_CHANGED_PASSWORD });
+
+    assert.equal(oldLinkResponse.status, 400);
+    assert.equal(oldLinkResponse.body.code, "INVALID_RESET_TOKEN");
+
+    const activationResponse = await request(app)
+      .post("/api/v1/auth/reset-password")
+      .send({ token: resentToken, newPassword: TEST_CHANGED_PASSWORD });
+
+    assert.equal(activationResponse.status, 200);
+
+    const session = await login(
+      "resend-invitation@example.com",
+      TEST_CHANGED_PASSWORD,
+    );
+    assert.equal(session.mustChangePassword, false);
+
+    const auditLog = database.auditLogs.find(
+      (log) => log.action === "INVITATION_RESENT",
+    );
+    assert.ok(auditLog);
+    assert.equal(auditLog.actorId, 1);
+    assert.equal(auditLog.entityId, userId);
+  });
+
+  it("rejects resending invitations for activated, inactive or unauthorized accounts", async () => {
+    const adminToken = (
+      await login("admin@example.com", TEST_ADMIN_PASSWORD)
+    ).token;
+
+    const activatedResponse = await request(app)
+      .post("/api/v1/users/2/resend-invitation")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(activatedResponse.status, 409);
+    assert.equal(activatedResponse.body.code, "INVITATION_NOT_PENDING");
+
+    const { userId } = await createInvitedUser(
+      adminToken,
+      "resend-inactive@example.com",
+    );
+
+    const deactivationResponse = await request(app)
+      .patch(`/api/v1/users/${userId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ isActive: false });
+
+    assert.equal(deactivationResponse.status, 200);
+
+    const inactiveResponse = await request(app)
+      .post(`/api/v1/users/${userId}/resend-invitation`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(inactiveResponse.status, 409);
+    assert.equal(inactiveResponse.body.code, "USER_INACTIVE");
+
+    const partnerToken = (
+      await login("partner@example.com", TEST_PARTNER_PASSWORD)
+    ).token;
+
+    const forbiddenResponse = await request(app)
+      .post("/api/v1/users/1/resend-invitation")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(forbiddenResponse.body.code, "ADMIN_REQUIRED");
+
+    const missingResponse = await request(app)
+      .post("/api/v1/users/999/resend-invitation")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(missingResponse.status, 404);
+    assert.equal(missingResponse.body.code, "USER_NOT_FOUND");
+  });
+
   it("invalidates a pending invitation when an ADMIN changes the email", async () => {
     const adminToken = (
       await login("admin@example.com", TEST_ADMIN_PASSWORD)

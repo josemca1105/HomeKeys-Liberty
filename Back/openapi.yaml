@@ -441,7 +441,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PasswordResetLinkResponse"
+                $ref: "#/components/schemas/EmailSentResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -452,6 +452,47 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: The account is deactivated (`USER_INACTIVE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (`TOO_MANY_ADMIN_ACTIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/{id}/resend-invitation:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      summary: Resend the activation invitation
+      description: |
+        ADMIN only. Reissues the 24-hour activation link for an account that is
+        still pending activation (`mustChangePassword: true`). Any previously
+        pending invitation or recovery link is replaced. Deactivated accounts
+        are rejected; activated accounts must use the password reset link
+        instead.
+      responses:
+        "200":
+          description: Invitation issued. `data.emailSent` reports whether SMTP accepted the message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailSentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The account is deactivated (`USER_INACTIVE`) or already activated
+            (`INVITATION_NOT_PENDING`).
           content:
             application/json:
               schema:
@@ -1001,7 +1042,7 @@ components:
               properties:
                 deletedId:
                   type: integer
-    PasswordResetLinkResponse:
+    EmailSentResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessBase"
         - type: object
