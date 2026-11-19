@@ -14,6 +14,7 @@ import {
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
 import { flushBackgroundTasks } from "./helpers/background-tasks";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 const INVALID_PASSWORD_CASES = [
   {
@@ -120,6 +121,8 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
     assert.equal(response.body.data.invitationSent, true);
     assert.equal(response.body.data.user.mustChangePassword, true);
 
+    await flushEmailOutbox();
+
     // The invitation email carries a one-time activation link and never the
     // initial password.
     assert.equal(outbox.length, 1);
@@ -179,6 +182,9 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
 
     assert.equal(firstResponse.status, 201);
     assert.equal(secondResponse.status, 201);
+
+    await flushEmailOutbox();
+
     assert.equal(outbox.length, 2);
 
     const firstToken = /#token=([0-9a-f]{64})/.exec(outbox[0]?.text ?? "");
@@ -197,6 +203,9 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.body.data.emailSent, true);
+
+    await flushEmailOutbox();
+
     assert.equal(outbox.length, 1);
 
     const mail = outbox[0];
@@ -356,6 +365,7 @@ describe("Password policy HTTP integration", { concurrency: false }, () => {
 
     assert.equal(forgotResponse.status, 200);
     await flushBackgroundTasks();
+    await flushEmailOutbox();
 
     const mail = outbox[outbox.length - 1];
     assert.ok(mail);

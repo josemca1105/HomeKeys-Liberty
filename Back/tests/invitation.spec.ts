@@ -14,6 +14,7 @@ import {
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
 import { flushBackgroundTasks } from "./helpers/background-tasks";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 describe("Invitation and forced password change HTTP integration", { concurrency: false }, () => {
   let app: Express;
@@ -68,6 +69,8 @@ describe("Invitation and forced password change HTTP integration", { concurrency
 
     assert.equal(response.status, 201);
 
+    await flushEmailOutbox();
+
     const invitationMail = outbox[outbox.length - 1];
     assert.ok(invitationMail);
 
@@ -110,6 +113,8 @@ describe("Invitation and forced password change HTTP integration", { concurrency
 
     assert.equal(response.status, 201);
 
+    await flushEmailOutbox();
+
     const storedToken = database.passwordResetTokens[0];
     assert.ok(storedToken);
     const ttlMs = storedToken.expiresAt.getTime() - Date.now();
@@ -127,7 +132,7 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     assert.equal(invitationMail.html.includes("?token="), false);
   });
 
-  it("reports email failures without breaking user creation", async () => {
+  it("queues the invitation when SMTP is unavailable", async () => {
     shouldFailMailDelivery = true;
     const adminToken = (
       await login("admin@example.com", TEST_ADMIN_PASSWORD)
@@ -145,13 +150,21 @@ describe("Invitation and forced password change HTTP integration", { concurrency
       });
 
     assert.equal(response.status, 201);
-    assert.equal(response.body.data.invitationSent, false);
+    assert.equal(response.body.data.invitationSent, true);
     assert.equal(response.body.data.user.mustChangePassword, true);
-    assert.equal(outbox.length, 0);
     assert.equal(
       database.users.some((user) => user.email === "no-mail@example.com"),
       true,
     );
+    assert.equal(database.emailOutbox.length, 1);
+
+    await flushEmailOutbox();
+
+    assert.equal(outbox.length, 0);
+    const queuedEmail = database.emailOutbox[0];
+    assert.ok(queuedEmail);
+    assert.equal(queuedEmail.status, "PENDING");
+    assert.equal(queuedEmail.attempts, 1);
   });
 
   it("blocks management routes while a password change is required", async () => {
@@ -236,6 +249,8 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     assert.equal(sendResponse.status, 200);
     assert.equal(sendResponse.body.data.emailSent, true);
 
+    await flushEmailOutbox();
+
     const resetMail = outbox[outbox.length - 1];
     assert.ok(resetMail);
     assert.equal(resetMail.to, "invitation-password@example.com");
@@ -287,6 +302,8 @@ describe("Invitation and forced password change HTTP integration", { concurrency
     assert.equal(response.status, 200);
     assert.equal(response.body.message, "Invitación reenviada.");
     assert.equal(response.body.data.emailSent, true);
+
+    await flushEmailOutbox();
 
     const resentMail = outbox[outbox.length - 1];
     assert.ok(resentMail);
@@ -411,6 +428,7 @@ describe("Invitation and forced password change HTTP integration", { concurrency
 
     assert.equal(forgotResponse.status, 200);
     await flushBackgroundTasks();
+    await flushEmailOutbox();
 
     const resetMail = outbox[outbox.length - 1];
     assert.ok(resetMail);

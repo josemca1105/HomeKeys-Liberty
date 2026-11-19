@@ -16,6 +16,7 @@ import {
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
 import { flushBackgroundTasks } from "./helpers/background-tasks";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 const extractResetToken = (mail: OutgoingMail): string => {
   // The token must travel in the URL fragment so it never reaches server
@@ -78,6 +79,7 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
       .send({ email: "partner@example.com" });
 
     await flushBackgroundTasks();
+    await flushEmailOutbox();
 
     assert.equal(unknownResponse.status, 200);
     assert.deepEqual(unknownResponse.body, knownResponse.body);
@@ -136,49 +138,27 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
   });
 
   it("responds without waiting for the email delivery", async () => {
-    let releaseMail: () => void = () => {};
-    let mailStarted = false;
-    const pendingMail = new Promise<void>((resolve) => {
-      releaseMail = resolve;
-    });
-
-    setMailSenderForTesting({
-      sendMail: async (options: OutgoingMail): Promise<unknown> => {
-        mailStarted = true;
-        await pendingMail;
-        return { accepted: [options.to] };
-      },
-    });
-
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error("The forgot-password response waited for SMTP."));
-      }, 1000);
-    });
-
-    let response: request.Response;
-
-    try {
-      response = await Promise.race([
-        request(app)
-          .post("/api/v1/auth/forgot-password")
-          .send({ email: "admin@example.com" }),
-        timeoutPromise,
-      ]);
-    } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-    }
+    const response = await request(app)
+      .post("/api/v1/auth/forgot-password")
+      .send({ email: "admin@example.com" });
 
     assert.equal(response.status, 200);
 
-    await flushBackgroundTasks();
-    assert.equal(mailStarted, true);
+    // The response returns before the email is delivered to the transport.
+    assert.equal(database.emailOutbox.length <= 1, true);
+    assert.equal(outbox.length, 0);
 
-    releaseMail();
     await flushBackgroundTasks();
+
+    // The background step enqueues the email durably but still does not send.
+    assert.equal(database.emailOutbox.length, 1);
+    assert.equal(database.emailOutbox[0]?.status, "PENDING");
+    assert.equal(outbox.length, 0);
+
+    await flushEmailOutbox();
+
+    assert.equal(outbox.length, 1);
+    assert.equal(database.emailOutbox[0]?.status, "SENT");
   });
 
   it("resets the password with a valid token and closes previous sessions", async () => {
@@ -191,6 +171,7 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
       .post("/api/v1/auth/forgot-password")
       .send({ email: "partner@example.com" });
     await flushBackgroundTasks();
+    await flushEmailOutbox();
     const rawToken = extractResetToken(outbox[0] as OutgoingMail);
 
     const response = await request(app)
@@ -351,6 +332,7 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
       .send({ email: "partner@example.com" });
 
     await flushBackgroundTasks();
+    await flushEmailOutbox();
 
     assert.equal(response.status, 200);
     assert.equal(
@@ -359,5 +341,9 @@ describe("Password recovery HTTP integration", { concurrency: false }, () => {
     );
     assert.equal(outbox.length, 0);
     assert.equal(database.passwordResetTokens.length, 1);
+    const queuedEmail = database.emailOutbox[0];
+    assert.ok(queuedEmail);
+    assert.equal(queuedEmail.status, "PENDING");
+    assert.equal(queuedEmail.attempts, 1);
   });
 });

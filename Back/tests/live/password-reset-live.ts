@@ -20,6 +20,7 @@ import { environment } from "../../src/config/env";
 import { prisma } from "../../src/config/database";
 import type { OutgoingMail } from "../../src/utils/mailer";
 import { setMailSenderForTesting } from "../../src/utils/mailer";
+import { processEmailOutboxBatch } from "../../src/services/email-outbox-service";
 import { hashPassword } from "../../src/utils/password";
 import { hashToken } from "../../src/utils/token";
 
@@ -66,6 +67,7 @@ const waitForOutbox = async (
       throw new Error("Timed out waiting for the password reset email.");
     }
 
+    await processEmailOutboxBatch({ limit: 100 });
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 };

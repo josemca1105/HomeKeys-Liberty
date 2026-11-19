@@ -23,6 +23,7 @@ import type { OutgoingMail } from "../../src/utils/mailer";
 import { setMailSenderForTesting } from "../../src/utils/mailer";
 import { hashPassword } from "../../src/utils/password";
 import { hashToken } from "../../src/utils/token";
+import { processEmailOutboxBatch } from "../../src/services/email-outbox-service";
 
 const LIVE_RUN = `${Date.now()}`;
 const LIVE_ADMIN_PASSWORD = "Live-Admin-Password1!";
@@ -60,6 +61,10 @@ const extractToken = (mail: OutgoingMail): string => {
   const match = /token=([0-9a-f]{64})/.exec(mail.text);
   assert.ok(match);
   return match[1] as string;
+};
+
+const deliverQueuedEmails = async (): Promise<void> => {
+  await processEmailOutboxBatch({ limit: 100 });
 };
 
 const login = async (
@@ -129,6 +134,8 @@ const run = async (): Promise<void> => {
   assert.equal("temporaryPassword" in createResponse.body.data, false);
   createdUserIds.push(createResponse.body.data.user.id as number);
 
+  await deliverQueuedEmails();
+
   const invitationMail = outbox[outbox.length - 1];
   assert.ok(invitationMail);
   assert.equal(invitationMail.to, invitedEmail);
@@ -151,73 +158,82 @@ const run = async (): Promise<void> => {
   const activatedSession = await login(invitedEmail, LIVE_SET_PASSWORD);
   assert.equal(activatedSession.mustChangePassword, false);
 
-  // 3. Explicit password: the welcome email never contains it and the user is
-  // forced to define a personal password before managing anything.
-  const explicitResponse = await request(app)
+  // 3. Resending the invitation invalidates the previous activation link.
+  const resendCreateResponse = await request(app)
     .post("/api/v1/users/add")
     .set("Authorization", `Bearer ${adminToken}`)
     .send({
       firstName: "Live",
-      lastName: "Explicit",
+      lastName: "Resend",
       email: explicitEmail,
-      password: LIVE_EXPLICIT_PASSWORD,
       phone: "00000000",
       photoUrl: null,
       role: Role.ADMIN,
     });
 
-  assert.equal(explicitResponse.status, 201);
-  assert.equal(explicitResponse.body.data.invitationSent, true);
-  createdUserIds.push(explicitResponse.body.data.user.id as number);
+  assert.equal(resendCreateResponse.status, 201);
+  assert.equal(resendCreateResponse.body.data.invitationSent, true);
+  const resendUserId = resendCreateResponse.body.data.user.id as number;
+  createdUserIds.push(resendUserId);
 
-  const explicitMail = outbox[outbox.length - 1];
-  assert.ok(explicitMail);
-  assert.equal(explicitMail.html.includes(LIVE_EXPLICIT_PASSWORD), false);
-  assert.equal(explicitMail.text.includes(LIVE_EXPLICIT_PASSWORD), false);
+  await deliverQueuedEmails();
+  const firstInvitationMail = outbox[outbox.length - 1];
+  assert.ok(firstInvitationMail);
+  const firstInvitationToken = extractToken(firstInvitationMail);
 
-  const explicitSession = await login(explicitEmail, LIVE_EXPLICIT_PASSWORD);
-  assert.equal(explicitSession.mustChangePassword, true);
+  const resendResponse = await request(app)
+    .post(`/api/v1/users/${resendUserId}/resend-invitation`)
+    .set("Authorization", `Bearer ${adminToken}`);
 
-  const blockedResponse = await request(app)
-    .get("/api/v1/users")
-    .set("Authorization", `Bearer ${explicitSession.token}`);
-  assert.equal(blockedResponse.status, 403);
-  assert.equal(blockedResponse.body.code, "PASSWORD_CHANGE_REQUIRED");
+  assert.equal(resendResponse.status, 200);
+  assert.equal(resendResponse.body.data.emailSent, true);
 
-  const changeResponse = await request(app)
-    .patch("/api/v1/users/me/password")
-    .set("Authorization", `Bearer ${explicitSession.token}`)
-    .send({
-      currentPassword: LIVE_EXPLICIT_PASSWORD,
-      newPassword: LIVE_FINAL_PASSWORD,
-    });
-  assert.equal(changeResponse.status, 200);
-  assert.equal(changeResponse.body.data.user.mustChangePassword, false);
+  await deliverQueuedEmails();
+  const resentMail = outbox[outbox.length - 1];
+  assert.ok(resentMail);
+  const resentToken = extractToken(resentMail);
+  assert.notEqual(resentToken, firstInvitationToken);
 
-  const restoredToken = changeResponse.body.data.token as string;
-  const restoredResponse = await request(app)
-    .get("/api/v1/users")
-    .set("Authorization", `Bearer ${restoredToken}`);
-  assert.equal(restoredResponse.status, 200);
+  const oldInvitationResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({ token: firstInvitationToken, newPassword: LIVE_SET_PASSWORD });
+  assert.equal(oldInvitationResponse.status, 400);
+  assert.equal(oldInvitationResponse.body.code, "INVALID_RESET_TOKEN");
 
-  // 4. ADMIN reset forces a new password change and notifies by email.
-  const resetUserId = explicitResponse.body.data.user.id as number;
-  const adminResetResponse = await request(app)
-    .patch(`/api/v1/users/${resetUserId}`)
-    .set("Authorization", `Bearer ${adminToken}`)
-    .send({ password: LIVE_EXPLICIT_PASSWORD });
+  const resentActivationResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({ token: resentToken, newPassword: LIVE_EXPLICIT_PASSWORD });
+  assert.equal(resentActivationResponse.status, 200);
 
-  assert.equal(adminResetResponse.status, 200);
-  assert.equal(adminResetResponse.body.data.user.mustChangePassword, true);
+  const resentSession = await login(explicitEmail, LIVE_EXPLICIT_PASSWORD);
+  assert.equal(resentSession.mustChangePassword, false);
 
-  const noticeMail = outbox[outbox.length - 1];
-  assert.ok(noticeMail);
-  assert.equal(noticeMail.to, explicitEmail);
+  // 4. ADMIN sends a reset link; the user defines the password.
+  const sendLinkResponse = await request(app)
+    .post(`/api/v1/users/${resendUserId}/send-password-reset`)
+    .set("Authorization", `Bearer ${adminToken}`);
+
+  assert.equal(sendLinkResponse.status, 200);
+  assert.equal(sendLinkResponse.body.data.emailSent, true);
+
+  await deliverQueuedEmails();
+  const resetMail = outbox[outbox.length - 1];
+  assert.ok(resetMail);
+  assert.equal(resetMail.to, explicitEmail);
   assert.equal(
-    noticeMail.subject,
-    "Tu contraseña fue restablecida - HomeKeys Liberty",
+    resetMail.subject,
+    "Restablece tu contraseña - HomeKeys Liberty",
   );
-  assert.equal(noticeMail.html.includes(LIVE_EXPLICIT_PASSWORD), false);
+  assert.equal(resetMail.html.includes(LIVE_EXPLICIT_PASSWORD), false);
+
+  const resetToken = extractToken(resetMail);
+  const resetResponse = await request(app)
+    .post("/api/v1/auth/reset-password")
+    .send({ token: resetToken, newPassword: LIVE_FINAL_PASSWORD });
+  assert.equal(resetResponse.status, 200);
+
+  const finalSession = await login(explicitEmail, LIVE_FINAL_PASSWORD);
+  assert.equal(finalSession.mustChangePassword, false);
 
   // 5. Expired invitation links are rejected and can be replaced through the
   // recovery flow.
@@ -235,6 +251,8 @@ const run = async (): Promise<void> => {
   assert.equal(expiredResponse.status, 201);
   const expiredUserId = expiredResponse.body.data.user.id as number;
   createdUserIds.push(expiredUserId);
+
+  await deliverQueuedEmails();
   const expiredToken = extractToken(outbox[outbox.length - 1] as OutgoingMail);
 
   await prisma.passwordResetToken.updateMany({

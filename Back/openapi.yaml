@@ -182,8 +182,9 @@ paths:
       summary: Create a user
       description: |
         ADMIN only. The administrator never sets or knows the password. The API
-        generates an internal credential and sends a single-use invitation link;
-        the user defines their own password when activating the account.
+        generates an internal credential, queues a single-use invitation link in
+        the same transaction, and the user defines their own password when
+        activating the account.
       requestBody:
         required: true
         content:
@@ -437,7 +438,7 @@ paths:
         accounts are rejected; reactivate them first.
       responses:
         "200":
-          description: Link issued. `data.emailSent` reports whether SMTP accepted the message.
+          description: Link issued and queued for durable delivery. `data.emailSent` is reported for compatibility.
           content:
             application/json:
               schema:
@@ -476,7 +477,7 @@ paths:
         instead.
       responses:
         "200":
-          description: Invitation issued. `data.emailSent` reports whether SMTP accepted the message.
+          description: Invitation issued and queued for durable delivery. `data.emailSent` is reported for compatibility.
           content:
             application/json:
               schema:

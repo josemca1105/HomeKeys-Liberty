@@ -12,6 +12,7 @@ import {
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 describe("Account status HTTP integration", { concurrency: false }, () => {
   let app: Express;
@@ -65,6 +66,8 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.data.user.isActive, false);
 
+    await flushEmailOutbox();
+
     assert.equal(outbox.length, 1);
     const notice = outbox[0];
     assert.ok(notice);
@@ -116,6 +119,8 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
 
     assert.equal(reactivationResponse.status, 200);
     assert.equal(reactivationResponse.body.data.user.isActive, true);
+
+    await flushEmailOutbox();
 
     assert.equal(outbox.length, 2);
     assert.equal(
@@ -246,6 +251,7 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(outbox.length, 0);
+    assert.equal(database.emailOutbox.length, 0);
   });
 
   it("keeps the update when the status notice cannot be delivered", async () => {
@@ -259,5 +265,12 @@ describe("Account status HTTP integration", { concurrency: false }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.body.data.user.isActive, false);
+
+    await flushEmailOutbox();
+
+    const queuedEmail = database.emailOutbox[0];
+    assert.ok(queuedEmail);
+    assert.equal(queuedEmail.status, "PENDING");
+    assert.equal(queuedEmail.attempts, 1);
   });
 });

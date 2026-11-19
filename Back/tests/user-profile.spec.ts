@@ -18,6 +18,7 @@ import {
   TEST_PARTNER_PASSWORD,
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 describe("User profile HTTP integration", { concurrency: false }, () => {
   let app: Express;
@@ -284,6 +285,8 @@ describe("User management HTTP integration", { concurrency: false }, () => {
     assert.equal(detailResponse.body.data.user.email, "nuevo@example.com");
     assert.equal(detailResponse.body.data.user.role, Role.ADMIN);
 
+    await flushEmailOutbox();
+
     // The previous address is notified, and the message never reveals the new
     // address (the old mailbox could be compromised).
     assert.equal(outbox.length, 1);
@@ -321,6 +324,7 @@ describe("User management HTTP integration", { concurrency: false }, () => {
 
     assert.equal(response.status, 200);
     assert.equal(outbox.length, 0);
+    assert.equal(database.emailOutbox.length, 0);
   });
 
   it("does not fail the update when the email notice cannot be delivered", async () => {
@@ -354,6 +358,9 @@ describe("User management HTTP integration", { concurrency: false }, () => {
 
     assert.equal(sendResponse.status, 200);
     assert.equal(sendResponse.body.data.emailSent, true);
+
+    await flushEmailOutbox();
+
     assert.equal(outbox.length, 1);
     assert.equal(outbox[0]?.to, "partner@example.com");
 

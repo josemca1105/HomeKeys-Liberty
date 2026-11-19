@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { AuditScope, type Prisma } from "@prisma/client";
+import { AuditScope, EmailType, type Prisma } from "@prisma/client";
 import { environment } from "../config/env";
+import { prisma } from "../config/database";
 import {
   applyPasswordReset,
   createPasswordResetToken,
@@ -11,7 +12,6 @@ import { findRecentPasswordHashes } from "../repositories/password-history-repos
 import { findUserByEmail, findUserCredentialsById } from "../repositories/user-repository";
 import type { AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
-import { sendPasswordResetEmail } from "../utils/mailer";
 import { hashPassword } from "../utils/password";
 import {
   assertPasswordNotBasedOnIdentity,
@@ -20,6 +20,7 @@ import {
 } from "../utils/password-policy";
 import { hashToken } from "../utils/token";
 import { buildAuditLogData } from "./audit-service";
+import { queueEmail } from "./email-outbox-service";
 
 export const PASSWORD_RESET_TOKEN_TTL_MINUTES = 15;
 export const INVITATION_TOKEN_TTL_MINUTES = 24 * 60;
@@ -117,21 +118,30 @@ const deliverPasswordResetEmail = async (
   user: PasswordResetRecipient,
 ): Promise<void> => {
   try {
-    const rawToken = await issuePasswordResetToken(
-      user.id,
-      PASSWORD_RESET_TOKEN_TTL_MINUTES,
-    );
+    await prisma.$transaction(async (transaction) => {
+      const rawToken = await issuePasswordResetToken(
+        user.id,
+        PASSWORD_RESET_TOKEN_TTL_MINUTES,
+        transaction,
+      );
 
-    await sendPasswordResetEmail({
-      to: user.email,
-      firstName: user.firstName,
-      resetUrl: buildPasswordResetUrl(rawToken),
-      expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
+      await queueEmail(
+        {
+          type: EmailType.PASSWORD_RESET,
+          to: user.email,
+          payload: {
+            firstName: user.firstName,
+            resetUrl: buildPasswordResetUrl(rawToken),
+            expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
+          },
+        },
+        transaction,
+      );
     });
   } catch (error) {
     // Logging only: the HTTP response is intentionally identical whether the
-    // email exists, the token cannot be issued or SMTP fails.
-    console.error("Failed to process the password reset email.", error);
+    // email exists, the token cannot be issued or the queue insert fails.
+    console.error("Failed to enqueue the password reset email.", error);
   }
 };
 

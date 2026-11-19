@@ -40,6 +40,7 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - Mandatory password change enforcement for accounts that still carry the flag.
 - Password recovery by email through Gmail SMTP with single-use, 15-minute tokens.
 - Per-IP, per-account and global rate limiting, with an optional Redis store for multiple instances.
+- Durable transactional email outbox with a background worker, exponential backoff and stale-claim recovery.
 - A configurable CORS allowlist and Express `trust proxy` setting.
 - Append-only security and business audit history, with ADMIN-wide visibility and PARTNER-scoped visibility.
 - Structured pino request logs with request IDs and secret redaction.
@@ -209,7 +210,7 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 
 The current physical database schema is entirely in English:
 
-- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `password_history`, `login_attempts`, and `audit_logs`.
+- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `password_history`, `login_attempts`, `email_outbox`, and `audit_logs`.
 - User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`. The `email` column uses PostgreSQL `citext`, so case-insensitive duplicates are rejected by the database itself, not only by the API validators.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
@@ -373,7 +374,7 @@ The body is strict: unknown fields are rejected with `400 VALIDATION_ERROR` inst
 
 The optional `photoUrl` must be an absolute `http` or `https` URL without embedded credentials. `javascript:`, `data:`, `ftp:` and literal localhost, private, link-local or internal hosts are rejected.
 
-Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. If the email cannot be delivered, the account is still created and `data.invitationSent` comes back as `false`; the ADMIN can resend the invitation with `POST /users/:id/resend-invitation`.
+Every created account receives a branded welcome email with a single-use activation link (valid for 24 hours) that opens the page where the user defines their personal password. The invitation is queued in the same transaction that creates the user, so `data.invitationSent` means the email was queued for durable delivery. A background worker sends it with retries; if delivery keeps failing, the ADMIN can queue a new one with `POST /users/:id/resend-invitation`.
 
 To create another administrator, add:
 
@@ -387,7 +388,7 @@ The only accepted roles are `ADMIN` and `PARTNER`. If `role` is omitted, the API
 
 Possible responses:
 
-- `201`: user created successfully; `data.invitationSent` reports whether the welcome email was sent.
+- `201`: user created successfully; `data.invitationSent` reports whether the welcome email was queued.
 - `400`: validation error.
 - `401`: missing, invalid, expired, or revoked token.
 - `403`: authenticated user is not an administrator.
@@ -524,7 +525,7 @@ Rules:
 
 - Activated accounts are rejected with `409 INVITATION_NOT_PENDING`; use `POST /users/:id/send-password-reset` instead.
 - Deactivated accounts are rejected with `409 USER_INACTIVE`; reactivate the account first.
-- The response reports `data.emailSent`: `false` means the token was issued but SMTP delivery failed.
+- The response reports `data.emailSent`: `true` means the token was issued and the link was queued for durable delivery. The worker retries failed deliveries with exponential backoff.
 
 ### Send a password reset link
 
@@ -539,7 +540,7 @@ Rules:
 
 - Deactivated accounts are rejected with `409 USER_INACTIVE`; reactivate the account first.
 - Any previously pending invitation or recovery link for that user is replaced.
-- The response reports `data.emailSent`: `false` means the token was issued but SMTP delivery failed. The ADMIN can retry; the previous token is replaced again.
+- The response reports `data.emailSent`: `true` means the link was queued for durable delivery. The worker retries failed deliveries with exponential backoff. The ADMIN can queue a new link; the previous one is replaced.
 
 Possible responses:
 
@@ -650,7 +651,7 @@ Public endpoint. The body is strict: unknown fields are rejected with `400 VALID
 
 When the email belongs to a registered user, the API stores a single-use recovery token and sends an email through Gmail SMTP with a link shaped as `{{PASSWORD_RESET_BASE_URL}}#token=<token>` — the token travels in the URL fragment, never in the query string, so it cannot reach server logs, proxies or `Referer` headers; the frontend reads it from `window.location.hash`. Only the SHA-256 hash of the token is stored; the raw token exists only inside the email. Deactivated accounts receive no recovery email, while the response stays generic.
 
-Token issuance and SMTP delivery run in the background after the generic response is sent. This keeps the response time approximately the same whether the email exists or not, closing the timing side channel that would otherwise reveal registered accounts. Delivery failures are logged server-side and do not change the response. A durable email queue is a future improvement for guaranteed delivery across process restarts.
+Token issuance and the queue insert run in the background after the generic response is sent. This keeps the response time approximately the same whether the email exists or not, closing the timing side channel that would otherwise reveal registered accounts. Once queued, the email is durable across restarts: the worker retries failed deliveries with exponential backoff. A crash in the tiny window between the response and the queue insert can still lose the email; the user can request another link.
 
 The response is always the same generic message, whether the email exists or not, so the endpoint cannot be used to discover registered accounts:
 
@@ -812,7 +813,7 @@ Account activation and password recovery share `POST /auth/reset-password`, so t
 | Step | Request | What happens | What to verify |
 | --- | --- | --- | --- |
 | 1 | `Login` | The ADMIN signs in | `200`; `accessToken`, `currentUserId`, and `currentUserRole` are stored |
-| 2 | `Create user` | The user is created and the welcome email is sent. The body does not accept a password | `201`, `data.invitationSent: true`, `data.user.mustChangePassword: true`, no `temporaryPassword`; the test stores the id in `targetUserId` |
+| 2 | `Create user` | The user is created and the welcome email is queued. The body does not accept a password | `201`, `data.invitationSent: true`, `data.user.mustChangePassword: true`, no `temporaryPassword`; the test stores the id in `targetUserId` |
 | 3 | The new user's mailbox | "Bienvenido a HomeKeys Liberty - Activa tu cuenta" arrives | Press "Activar mi cuenta" and copy the `token=` value from the link |
 | 4 | Paste it into the `resetToken` collection variable | — | — |
 | 5 | `Reset password` (`token: {{resetToken}}`, `newPassword: {{newUserPassword}}`) | The user defines a personal password | `200` "Contraseña restablecida exitosamente." |
@@ -947,6 +948,7 @@ prisma/migrations/20261112130000_add_login_lockout/
 prisma/migrations/20261112140000_add_user_is_active/
 prisma/migrations/20261116120000_use_citext_email/
 prisma/migrations/20261116160000_add_password_history/
+prisma/migrations/20261118120000_add_email_outbox/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -964,6 +966,8 @@ The sixth one adds `users.is_active` for account deactivation. Deactivated accou
 The seventh one converts `users.email` to PostgreSQL `citext` (enabling the extension), so the unique index rejects case-variant duplicates even when rows are written outside the API. The API keeps normalizing emails to lowercase, and the live check `tests/live/email-case-live.ts` verifies the database behavior.
 
 The eighth one creates `password_history` to reject reuse of the last 5 passwords. The table cascades with the user, keeps one row per replaced bcrypt hash, and is pruned inside the same transaction that changes the password.
+
+The ninth one creates `email_outbox` and its enums for the durable email queue. Rows are inserted in the same transaction as the business change, claimed by the worker with a conditional update, retried with backoff and cleaned after 30 days.
 
 Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
@@ -992,7 +996,8 @@ The password recovery and invitation flows need no other migrations: they reuse 
 - Changing a password or email deletes any pending invitation or password recovery link in the same transaction, so a previously delivered link cannot be reused after an administrator remediates an account. An email change also notifies the previous address without revealing the new one.
 - The last ADMIN can be neither deleted nor demoted, an ADMIN cannot delete itself, and users with properties are blocked with `409 USER_HAS_PROPERTIES` so real estate data is never removed without an explicit product decision. The last-ADMIN check and the mutation run in the same serializable transaction, with automatic retry on PostgreSQL serialization failures, so concurrent demotions or deletions cannot leave the system without an administrator.
 - User deletion cleans `revoked_tokens` and `password_reset_tokens` rows in the same transaction. Database foreign keys also cascade those rows if a user is deleted outside the API.
-- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and SMTP delivery run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested. Deactivated accounts receive no recovery email.
+- Password recovery answers with the same generic response whether the email exists or not, preventing user enumeration. Token issuance and the queue insert run after the response, so the endpoint does not leak account existence through response timing. Recovery tokens are 32 random bytes, stored only as SHA-256 hashes, valid for 15 minutes, single-use, and invalidated when a new link is requested. Deactivated accounts receive no recovery email.
+- Emails are queued in `email_outbox` inside the transaction that owns the business change (user creation, reset-link issuance, email change, account status). A background worker claims pending rows, sends them, and retries failures with exponential backoff up to 5 attempts; delivered and failed rows are removed after 30 days. `SENDING` rows abandoned by a crash are released after five minutes. Multiple instances can run the worker because each row is claimed with a conditional update.
 - Administrators never set, receive, or learn passwords. `POST /users/:id/send-password-reset` issues a single-use link; the user defines the password. Every replaced password is stored as a bcrypt hash in `password_history`, and the last 5 cannot be reused through either the change or the recovery flow.
 - User accounts never expose a password anywhere: initial passwords are generated internally, invitation and notice emails carry only links, and explicit ADMIN passwords travel through their own channel. Invitation tokens are single-use and valid for 24 hours.
 - Accounts that still carry `mustChangePassword` must define a personal password before using the API (`403 PASSWORD_CHANGE_REQUIRED`). Current flows do not set the flag; it is enforced defensively for legacy or manually prepared accounts.

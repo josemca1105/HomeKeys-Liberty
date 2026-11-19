@@ -1,4 +1,4 @@
-import { Prisma, Role, AuditScope } from "@prisma/client";
+import { AuditScope, EmailType, Prisma, Role } from "@prisma/client";
 import { prisma } from "../config/database";
 import { environment } from "../config/env";
 import {
@@ -42,12 +42,6 @@ import type { AuditAction, AuditContext } from "../types/audit";
 import { AppError } from "../utils/app-error";
 import { generateAuthToken } from "../utils/jwt";
 import {
-  sendAccountStatusNoticeEmail,
-  sendEmailChangeNoticeEmail,
-  sendInvitationEmail,
-  sendPasswordResetEmail,
-} from "../utils/mailer";
-import {
   comparePassword,
   generateTemporaryPassword,
   hashPassword,
@@ -59,6 +53,7 @@ import {
 } from "../utils/password-policy";
 import { toUserResponse } from "../utils/user-response";
 import { recordAuditEventInTransaction } from "./audit-service";
+import { queueEmail } from "./email-outbox-service";
 
 const duplicateEmailError = (): AppError => {
   return new AppError({
@@ -217,29 +212,6 @@ export const getUserProfile = async (
   return toUserResponse(user);
 };
 
-const sendInvitation = async (user: UserResponse): Promise<boolean> => {
-  try {
-    const activationToken = await issuePasswordResetToken(
-      user.id,
-      INVITATION_TOKEN_TTL_MINUTES,
-    );
-
-    await sendInvitationEmail({
-      to: user.email,
-      firstName: user.firstName,
-      activationUrl: `${environment.PASSWORD_RESET_BASE_URL}#token=${activationToken}`,
-      expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
-    });
-
-    return true;
-  } catch (error) {
-    // The account is created regardless; the ADMIN can resend the link later
-    // through the password recovery flow.
-    console.error("Failed to send the invitation email.", error);
-    return false;
-  }
-};
-
 export const registerUser = async (
   input: CreateUserInput,
   auditContext: AuditContext,
@@ -288,6 +260,25 @@ export const registerUser = async (
         request: auditContext.request,
       });
 
+      const activationToken = await issuePasswordResetToken(
+        createdUser.id,
+        INVITATION_TOKEN_TTL_MINUTES,
+        transaction,
+      );
+
+      await queueEmail(
+        {
+          type: EmailType.INVITATION,
+          to: createdUser.email,
+          payload: {
+            firstName: createdUser.firstName,
+            activationUrl: buildPasswordResetUrl(activationToken),
+            expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
+          },
+        },
+        transaction,
+      );
+
       return createdUser;
     });
   } catch (error) {
@@ -301,10 +292,7 @@ export const registerUser = async (
     throw error;
   }
 
-  const safeUser = toUserResponse(user);
-  const invitationSent = await sendInvitation(safeUser);
-
-  return { user: safeUser, invitationSent };
+  return { user: toUserResponse(user), invitationSent: true };
 };
 
 export const changeOwnPassword = async (
@@ -567,38 +555,42 @@ export const updateUserByAdmin = async (
           request: auditContext.request,
         });
 
+        if (previousEmail !== null) {
+          // The notice goes to the previous address so its owner can react if
+          // the change was not expected. It omits the new address.
+          await queueEmail(
+            {
+              type: EmailType.EMAIL_CHANGE_NOTICE,
+              to: previousEmail,
+              payload: {
+                firstName: updatedRecord.firstName,
+                loginUrl: environment.APP_BASE_URL,
+              },
+            },
+            transaction,
+          );
+        }
+
+        if (statusChange !== null) {
+          await queueEmail(
+            {
+              type: EmailType.ACCOUNT_STATUS_NOTICE,
+              to: updatedRecord.email,
+              payload: {
+                firstName: updatedRecord.firstName,
+                isActive: statusChange === "reactivated",
+                loginUrl: environment.APP_BASE_URL,
+              },
+            },
+            transaction,
+          );
+        }
+
         return { updatedRecord, statusChange };
       },
     );
 
     const updatedUser = transactionResult.updatedRecord;
-
-    if (previousEmail !== null) {
-      // The notice goes to the previous address so its owner can react if the
-      // change was not expected. It deliberately omits the new address.
-      try {
-        await sendEmailChangeNoticeEmail({
-          to: previousEmail,
-          firstName: updatedUser.firstName,
-          loginUrl: environment.APP_BASE_URL,
-        });
-      } catch (error) {
-        console.error("Failed to send the email change notice email.", error);
-      }
-    }
-
-    if (transactionResult.statusChange !== null) {
-      try {
-        await sendAccountStatusNoticeEmail({
-          to: updatedUser.email,
-          firstName: updatedUser.firstName,
-          isActive: transactionResult.statusChange === "reactivated",
-          loginUrl: environment.APP_BASE_URL,
-        });
-      } catch (error) {
-        console.error("Failed to send the account status notice email.", error);
-      }
-    }
 
     return {
       user: toUserResponse(updatedUser),
@@ -715,7 +707,7 @@ export const sendPasswordResetLinkByAdmin = async (
     throw userInactiveError();
   }
 
-  const rawToken = await prisma.$transaction(async (transaction) => {
+  await prisma.$transaction(async (transaction) => {
     const issuedToken = await issuePasswordResetToken(
       targetUserId,
       PASSWORD_RESET_TOKEN_TTL_MINUTES,
@@ -731,20 +723,19 @@ export const sendPasswordResetLinkByAdmin = async (
       request: auditContext.request,
     });
 
-    return issuedToken;
+    await queueEmail(
+      {
+        type: EmailType.PASSWORD_RESET,
+        to: user.email,
+        payload: {
+          firstName: user.firstName,
+          resetUrl: buildPasswordResetUrl(issuedToken),
+          expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
+        },
+      },
+      transaction,
+    );
   });
-
-  try {
-    await sendPasswordResetEmail({
-      to: user.email,
-      firstName: user.firstName,
-      resetUrl: buildPasswordResetUrl(rawToken),
-      expirationMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
-    });
-  } catch (error) {
-    console.error("Failed to send the admin password reset email.", error);
-    return { emailSent: false };
-  }
 
   return { emailSent: true };
 };
@@ -773,7 +764,7 @@ export const resendInvitationByAdmin = async (
     throw invitationNotPendingError();
   }
 
-  const rawToken = await prisma.$transaction(async (transaction) => {
+  await prisma.$transaction(async (transaction) => {
     const issuedToken = await issuePasswordResetToken(
       targetUserId,
       INVITATION_TOKEN_TTL_MINUTES,
@@ -789,20 +780,19 @@ export const resendInvitationByAdmin = async (
       request: auditContext.request,
     });
 
-    return issuedToken;
+    await queueEmail(
+      {
+        type: EmailType.INVITATION,
+        to: user.email,
+        payload: {
+          firstName: user.firstName,
+          activationUrl: buildPasswordResetUrl(issuedToken),
+          expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
+        },
+      },
+      transaction,
+    );
   });
-
-  try {
-    await sendInvitationEmail({
-      to: user.email,
-      firstName: user.firstName,
-      activationUrl: buildPasswordResetUrl(rawToken),
-      expirationHours: INVITATION_TOKEN_TTL_MINUTES / 60,
-    });
-  } catch (error) {
-    console.error("Failed to resend the invitation email.", error);
-    return { emailSent: false };
-  }
 
   return { emailSent: true };
 };

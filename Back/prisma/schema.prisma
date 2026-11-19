@@ -53,6 +53,20 @@ enum PropertyStatus {
   Inactive
 }
 
+enum EmailType {
+  INVITATION
+  PASSWORD_RESET
+  EMAIL_CHANGE_NOTICE
+  ACCOUNT_STATUS_NOTICE
+}
+
+enum EmailOutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
 model User {
   id           Int     @id @default(autoincrement())
   firstName    String  @map("first_name") @db.VarChar(100)
@@ -174,6 +188,28 @@ model PasswordHistory {
 
   @@index([userId, createdAt])
   @@map("password_history")
+}
+
+// Durable email queue. Emails are inserted in the same transaction as the
+// business change and delivered by a background worker with retries.
+model EmailOutbox {
+  id            Int               @id @default(autoincrement())
+  type          EmailType
+  to            String            @db.VarChar(255)
+  payload       Json
+  status        EmailOutboxStatus @default(PENDING)
+  attempts      Int               @default(0)
+  maxAttempts   Int               @default(5) @map("max_attempts")
+  nextAttemptAt DateTime          @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?         @map("locked_at")
+  lastError     String?           @map("last_error") @db.VarChar(500)
+  sentAt        DateTime?         @map("sent_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+  @@map("email_outbox")
 }
 
 // Persistent brute-force protection keyed by the submitted email, including

@@ -2,6 +2,9 @@ import { Prisma, Role } from "@prisma/client";
 import type {
   AuditLog,
   AuditScope,
+  EmailOutbox,
+  EmailOutboxStatus,
+  EmailType,
   LoginAttempt,
   PasswordHistory,
   PasswordResetToken,
@@ -251,6 +254,7 @@ interface TransactionClientMock {
   loginAttempt: LoginAttemptDelegateMock;
   auditLog: AuditLogDelegateMock;
   passwordHistory: PasswordHistoryDelegateMock;
+  emailOutbox: EmailOutboxDelegateMock;
 }
 
 interface LoginAttemptDelegateMock {
@@ -293,12 +297,51 @@ interface PasswordHistoryDelegateMock {
   }) => Promise<{ count: number }>;
 }
 
+interface EmailOutboxWhereMock {
+  id?: number;
+  status?:
+    | EmailOutboxStatus
+    | { in: EmailOutboxStatus[] };
+  nextAttemptAt?: { lte?: Date };
+  lockedAt?: { lt?: Date };
+  createdAt?: { lt?: Date };
+}
+
+interface EmailOutboxDelegateMock {
+  create: (args: {
+    data: {
+      type: EmailType;
+      to: string;
+      payload: Prisma.InputJsonValue;
+      maxAttempts?: number;
+      nextAttemptAt?: Date;
+    };
+  }) => Promise<EmailOutbox>;
+  findMany: (args: {
+    where: EmailOutboxWhereMock;
+    orderBy?: Array<Record<string, string>>;
+    take?: number;
+  }) => Promise<EmailOutbox[]>;
+  updateMany: (args: {
+    where: EmailOutboxWhereMock;
+    data: Partial<EmailOutbox>;
+  }) => Promise<{ count: number }>;
+  update: (args: {
+    where: { id: number };
+    data: Partial<EmailOutbox>;
+  }) => Promise<EmailOutbox>;
+  deleteMany: (args: {
+    where: EmailOutboxWhereMock;
+  }) => Promise<{ count: number }>;
+}
+
 export interface MockDatabase {
   users: User[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
   loginAttempts: LoginAttempt[];
   passwordHistory: PasswordHistory[];
+  emailOutbox: EmailOutbox[];
   auditLogs: AuditLog[];
   getUserCreateCallCount: () => number;
   getUserFindManyCallCount: () => number;
@@ -378,6 +421,7 @@ export const createMockDatabase = (): MockDatabase => {
   const passwordResetTokens: PasswordResetToken[] = [];
   const loginAttempts: LoginAttempt[] = [];
   const passwordHistoryEntries: PasswordHistory[] = [];
+  const emailOutboxEntries: EmailOutbox[] = [];
   const auditLogs: AuditLog[] = [];
   const agentPropertyCounts = new Map<number, number>();
   let shouldFailNextUserCreate = false;
@@ -453,6 +497,142 @@ export const createMockDatabase = (): MockDatabase => {
     passwordHistoryEntries.splice(
       0,
       passwordHistoryEntries.length,
+      ...remaining,
+    );
+    return { count: previousCount - remaining.length };
+  };
+
+  const emailOutboxDelegate =
+    prisma.emailOutbox as unknown as EmailOutboxDelegateMock;
+
+  const matchesEmailOutboxWhere = (
+    entry: EmailOutbox,
+    where: EmailOutboxWhereMock,
+  ): boolean => {
+    if (where.id !== undefined && entry.id !== where.id) {
+      return false;
+    }
+
+    if (where.status !== undefined) {
+      if (typeof where.status === "string") {
+        if (entry.status !== where.status) {
+          return false;
+        }
+      } else if (!where.status.in.includes(entry.status)) {
+        return false;
+      }
+    }
+
+    const nextAttemptBefore = where.nextAttemptAt?.lte;
+
+    if (
+      nextAttemptBefore !== undefined &&
+      entry.nextAttemptAt.getTime() > nextAttemptBefore.getTime()
+    ) {
+      return false;
+    }
+
+    const lockedBefore = where.lockedAt?.lt;
+
+    if (
+      lockedBefore !== undefined &&
+      (entry.lockedAt === null || entry.lockedAt.getTime() >= lockedBefore.getTime())
+    ) {
+      return false;
+    }
+
+    const createdBefore = where.createdAt?.lt;
+
+    if (
+      createdBefore !== undefined &&
+      entry.createdAt.getTime() >= createdBefore.getTime()
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
+  emailOutboxDelegate.create = async (args): Promise<EmailOutbox> => {
+    const nextId =
+      emailOutboxEntries.length > 0
+        ? Math.max(...emailOutboxEntries.map((entry) => entry.id)) + 1
+        : 1;
+    const now = new Date();
+    const entry: EmailOutbox = {
+      id: nextId,
+      type: args.data.type,
+      to: args.data.to,
+      payload: args.data.payload as EmailOutbox["payload"],
+      status: "PENDING",
+      attempts: 0,
+      maxAttempts: args.data.maxAttempts ?? 5,
+      nextAttemptAt: args.data.nextAttemptAt ?? now,
+      lockedAt: null,
+      lastError: null,
+      sentAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    emailOutboxEntries.push(entry);
+    return { ...entry };
+  };
+
+  emailOutboxDelegate.findMany = async (args): Promise<EmailOutbox[]> => {
+    const matching = emailOutboxEntries
+      .filter((entry) => matchesEmailOutboxWhere(entry, args.where))
+      .sort((first, second) => {
+        const byNextAttempt =
+          first.nextAttemptAt.getTime() - second.nextAttemptAt.getTime();
+        return byNextAttempt !== 0 ? byNextAttempt : first.id - second.id;
+      });
+    const limited =
+      args.take !== undefined ? matching.slice(0, args.take) : matching;
+
+    return limited.map((entry) => ({ ...entry }));
+  };
+
+  emailOutboxDelegate.updateMany = async (
+    args,
+  ): Promise<{ count: number }> => {
+    const matching = emailOutboxEntries.filter((entry) =>
+      matchesEmailOutboxWhere(entry, args.where),
+    );
+
+    for (const entry of matching) {
+      Object.assign(entry, args.data, { updatedAt: new Date() });
+    }
+
+    return { count: matching.length };
+  };
+
+  emailOutboxDelegate.update = async (args): Promise<EmailOutbox> => {
+    const entry = emailOutboxEntries.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!entry) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(entry, args.data, { updatedAt: new Date() });
+    return { ...entry };
+  };
+
+  emailOutboxDelegate.deleteMany = async (
+    args,
+  ): Promise<{ count: number }> => {
+    const previousCount = emailOutboxEntries.length;
+    const remaining = emailOutboxEntries.filter(
+      (entry) => !matchesEmailOutboxWhere(entry, args.where),
+    );
+
+    emailOutboxEntries.splice(
+      0,
+      emailOutboxEntries.length,
       ...remaining,
     );
     return { count: previousCount - remaining.length };
@@ -1080,6 +1260,7 @@ export const createMockDatabase = (): MockDatabase => {
     loginAttempt: loginAttemptDelegate,
     auditLog: auditLogDelegate,
     passwordHistory: passwordHistoryDelegate,
+    emailOutbox: emailOutboxDelegate,
   };
 
   let serializableTransactionQueue: Promise<unknown> = Promise.resolve();
@@ -1134,6 +1315,7 @@ export const createMockDatabase = (): MockDatabase => {
     passwordResetTokens,
     loginAttempts,
     passwordHistory: passwordHistoryEntries,
+    emailOutbox: emailOutboxEntries,
     auditLogs,
     getUserCreateCallCount: (): number => userCreateCallCount,
     getUserFindManyCallCount: (): number => userFindManyCallCount,

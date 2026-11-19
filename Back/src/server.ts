@@ -3,13 +3,41 @@ import { prisma } from "./config/database";
 import { environment } from "./config/env";
 import { cleanupAuditLogsByRetention } from "./services/audit-retention-service";
 import {
+  cleanupOldEmails,
+  processEmailOutboxBatch,
+} from "./services/email-outbox-service";
+import {
   cleanupExpiredPasswordResetTokens,
   cleanupExpiredRevokedTokens,
   cleanupStaleLoginAttempts,
 } from "./services/token-cleanup-service";
 
 const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const EMAIL_OUTBOX_INTERVAL_MS = 60 * 1000;
 let isTokenCleanupRunning = false;
+let isEmailOutboxRunning = false;
+
+const runEmailOutbox = async (): Promise<void> => {
+  if (isEmailOutboxRunning) {
+    return;
+  }
+
+  isEmailOutboxRunning = true;
+
+  try {
+    const result = await processEmailOutboxBatch();
+
+    if (result.sent > 0 || result.failed > 0) {
+      console.log(
+        `Email outbox: ${result.sent} sent, ${result.failed} failed.`,
+      );
+    }
+  } catch (error) {
+    console.error("Failed to process the email outbox.", error);
+  } finally {
+    isEmailOutboxRunning = false;
+  }
+};
 
 const runTokenCleanup = async (): Promise<void> => {
   if (isTokenCleanupRunning) {
@@ -44,6 +72,12 @@ const runTokenCleanup = async (): Promise<void> => {
     if (deletedLoginAttempts > 0) {
       console.log(`Removed ${deletedLoginAttempts} stale login attempts.`);
     }
+
+    const deletedEmails = await cleanupOldEmails();
+
+    if (deletedEmails > 0) {
+      console.log(`Removed ${deletedEmails} old queued emails.`);
+    }
   } catch (error) {
     console.error("Failed to clean up expired tokens.", error);
   } finally {
@@ -54,11 +88,17 @@ const runTokenCleanup = async (): Promise<void> => {
 const startServer = async (): Promise<void> => {
   await prisma.$connect();
   await runTokenCleanup();
+  await runEmailOutbox();
 
   const cleanupInterval = setInterval((): void => {
     void runTokenCleanup();
   }, TOKEN_CLEANUP_INTERVAL_MS);
   cleanupInterval.unref();
+
+  const emailOutboxInterval = setInterval((): void => {
+    void runEmailOutbox();
+  }, EMAIL_OUTBOX_INTERVAL_MS);
+  emailOutboxInterval.unref();
 
   const server = createApp().listen(environment.PORT, (): void => {
     console.log(`HomeKeys Liberty API listening on port ${environment.PORT}.`);
@@ -67,6 +107,7 @@ const startServer = async (): Promise<void> => {
   const shutdown = (signal: string): void => {
     console.log(`${signal} received. Closing the server.`);
     clearInterval(cleanupInterval);
+    clearInterval(emailOutboxInterval);
 
     server.close((): void => {
       void prisma

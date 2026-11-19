@@ -11,6 +11,7 @@ import {
 } from "./helpers/mock-database";
 import type { MockDatabase } from "./helpers/mock-database";
 import { flushBackgroundTasks } from "./helpers/background-tasks";
+import { flushEmailOutbox } from "./helpers/email-outbox";
 
 const REUSE_MESSAGE =
   "No puedes reutilizar una de tus últimas 5 contraseñas.";
@@ -127,6 +128,7 @@ describe("Password history HTTP integration", { concurrency: false }, () => {
       .send({ email: "partner@example.com" });
     assert.equal(forgotResponse.status, 200);
     await flushBackgroundTasks();
+    await flushEmailOutbox();
 
     const mail = outbox[outbox.length - 1];
     assert.ok(mail);

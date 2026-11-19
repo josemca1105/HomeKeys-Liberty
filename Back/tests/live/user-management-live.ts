@@ -17,6 +17,7 @@ import { createApp } from "../../src/app";
 import { prisma } from "../../src/config/database";
 import type { OutgoingMail } from "../../src/utils/mailer";
 import { setMailSenderForTesting } from "../../src/utils/mailer";
+import { processEmailOutboxBatch } from "../../src/services/email-outbox-service";
 import { hashPassword } from "../../src/utils/password";
 
 const LIVE_SUFFIX = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -37,6 +38,10 @@ setMailSenderForTesting({
     return { accepted: [options.to] };
   },
 });
+
+const deliverQueuedEmails = async (): Promise<void> => {
+  await processEmailOutboxBatch({ limit: 100 });
+};
 
 const cleanup = async (): Promise<void> => {
   if (createdPropertyIds.length > 0) {
@@ -218,6 +223,7 @@ const run = async (): Promise<void> => {
 
   // The activation link defines the initial personal password. Resending the
   // invitation must invalidate the original link first.
+  await deliverQueuedEmails();
   const invitationMail = outbox[outbox.length - 1];
   assert.ok(invitationMail);
   const originalTokenMatch = /token=([0-9a-f]{64})/.exec(invitationMail.text);
@@ -230,6 +236,7 @@ const run = async (): Promise<void> => {
   assert.equal(resendResponse.status, 200);
   assert.equal(resendResponse.body.data.emailSent, true);
 
+  await deliverQueuedEmails();
   const resentMail = outbox[outbox.length - 1];
   assert.ok(resentMail);
   const resentTokenMatch = /token=([0-9a-f]{64})/.exec(resentMail.text);
@@ -319,6 +326,7 @@ const run = async (): Promise<void> => {
   assert.equal(sendResetLinkResponse.status, 200);
   assert.equal(sendResetLinkResponse.body.data.emailSent, true);
 
+  await deliverQueuedEmails();
   const resetMail = outbox[outbox.length - 1];
   assert.ok(resetMail);
   const resetTokenMatch = /token=([0-9a-f]{64})/.exec(resetMail.text);
@@ -354,6 +362,7 @@ const run = async (): Promise<void> => {
 
   assert.equal(secondLinkResponse.status, 200);
 
+  await deliverQueuedEmails();
   const secondResetMail = outbox[outbox.length - 1];
   assert.ok(secondResetMail);
   const secondTokenMatch = /token=([0-9a-f]{64})/.exec(secondResetMail.text);
