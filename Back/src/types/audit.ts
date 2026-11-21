@@ -15,7 +15,12 @@ export type AuditAction =
   | "USER_PASSWORD_RESET"
   | "PASSWORD_RESET_LINK_SENT"
   | "INVITATION_RESENT"
-  | "USER_DELETED";
+  | "USER_DELETED"
+  | "PROPERTY_CREATED"
+  | "PROPERTY_UPDATED"
+  | "PROPERTY_STATUS_CHANGED"
+  | "PROPERTY_REASSIGNED"
+  | "PROPERTY_DELETED";
 
 export interface AuditActor {
   id?: number;

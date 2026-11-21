@@ -115,7 +115,7 @@ model User {
 model Property {
   id           Int            @id @default(autoincrement())
   agentId      Int            @map("agent_id")
-  code         String         @unique @db.VarChar(50)
+  code         String         @unique @default(dbgenerated("('HK-' || to_char(CURRENT_DATE, 'YYYY') || '-' || lpad(nextval('property_code_seq')::text, 6, '0'))")) @db.VarChar(50)
   title        String         @db.VarChar(200)
   propertyType PropertyType   @map("property_type")
   listingType  ListingType    @map("listing_type")

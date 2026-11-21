@@ -20,6 +20,16 @@ const MIGRATION_PATH = path.join(
 
 const migrationSql = readFileSync(MIGRATION_PATH, "utf8");
 
+const CODE_MIGRATION_PATH = path.join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20261120120000_add_property_code_generator",
+  "migration.sql",
+);
+
+const codeMigrationSql = readFileSync(CODE_MIGRATION_PATH, "utf8");
+
 const getModel = (name: string) => {
   const model = Prisma.dmmf.datamodel.models.find(
     (candidate) => candidate.name === name,
@@ -131,6 +141,23 @@ describe("Property capture schema", () => {
     const fieldNames = new Set(photo.fields.map((field) => field.name));
 
     assert.equal(fieldNames.has("imageUrl"), false);
+  });
+
+  it("generates internal codes in PostgreSQL", () => {
+    const codeField = getModel("Property").fields.find(
+      (field) => field.name === "code",
+    );
+
+    assert.ok(codeField);
+    assert.equal(codeField.hasDefaultValue, true);
+    assert.match(
+      codeMigrationSql,
+      /CREATE SEQUENCE "property_code_seq"/,
+    );
+    assert.match(
+      codeMigrationSql,
+      /ALTER COLUMN "code"[\s\S]*SET DEFAULT/,
+    );
   });
 
   it("enforces database checks and a single cover photo", () => {

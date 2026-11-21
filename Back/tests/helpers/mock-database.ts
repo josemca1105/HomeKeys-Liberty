@@ -1,4 +1,4 @@
-import { Prisma, Role } from "@prisma/client";
+import { Currency, Prisma, PropertyStatus, Role } from "@prisma/client";
 import type {
   AuditLog,
   AuditScope,
@@ -8,6 +8,7 @@ import type {
   LoginAttempt,
   PasswordHistory,
   PasswordResetToken,
+  Property,
   RevokedToken,
   User,
 } from "@prisma/client";
@@ -68,10 +69,28 @@ interface CountUsersArgs {
   where?: UserWhereMock;
 }
 
+interface PropertyWhereMock {
+  id?: number;
+  agentId?: number;
+  deletedAt?: Date | null;
+  status?: PropertyStatus | { in: PropertyStatus[] };
+}
+
 interface CountPropertiesArgs {
-  where: {
-    agentId: number;
-  };
+  where: PropertyWhereMock;
+}
+
+interface FindPropertyArgs {
+  where: PropertyWhereMock;
+}
+
+interface CreatePropertyArgs {
+  data: Prisma.PropertyUncheckedCreateInput;
+}
+
+interface UpdatePropertyArgs {
+  where: { id: number };
+  data: Prisma.PropertyUncheckedUpdateInput;
 }
 
 interface FindRevokedTokenArgs {
@@ -172,6 +191,9 @@ interface UserDelegateMock {
 
 interface PropertyDelegateMock {
   count: (args: CountPropertiesArgs) => Promise<number>;
+  findFirst: (args: FindPropertyArgs) => Promise<Property | null>;
+  create: (args: CreatePropertyArgs) => Promise<Property>;
+  update: (args: UpdatePropertyArgs) => Promise<Property>;
 }
 
 interface RevokedTokenDelegateMock {
@@ -337,6 +359,7 @@ interface EmailOutboxDelegateMock {
 
 export interface MockDatabase {
   users: User[];
+  properties: Property[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
   loginAttempts: LoginAttempt[];
@@ -417,6 +440,7 @@ export const createMockDatabase = (): MockDatabase => {
     createUser(1, "admin@example.com", Role.ADMIN, ADMIN_PASSWORD_HASH),
     createUser(2, "partner@example.com", Role.PARTNER, PARTNER_PASSWORD_HASH),
   ];
+  const properties: Property[] = [];
   const revokedTokens: RevokedToken[] = [];
   const passwordResetTokens: PasswordResetToken[] = [];
   const loginAttempts: LoginAttempt[] = [];
@@ -908,10 +932,180 @@ export const createMockDatabase = (): MockDatabase => {
     return users.filter((user) => matchesUserWhere(user, args.where)).length;
   };
 
+  const asDecimal = (value: unknown): Prisma.Decimal => {
+    if (value instanceof Prisma.Decimal) {
+      return value;
+    }
+
+    if (typeof value === "number" || typeof value === "string") {
+      return new Prisma.Decimal(value);
+    }
+
+    throw new Error("Invalid decimal value in property mock.");
+  };
+
+  const matchesPropertyWhere = (
+    property: Property,
+    where: PropertyWhereMock,
+  ): boolean => {
+    if (where.id !== undefined && property.id !== where.id) {
+      return false;
+    }
+
+    if (where.agentId !== undefined && property.agentId !== where.agentId) {
+      return false;
+    }
+
+    if (
+      where.deletedAt === null &&
+      property.deletedAt !== null
+    ) {
+      return false;
+    }
+
+    if (
+      where.deletedAt instanceof Date &&
+      property.deletedAt?.getTime() !== where.deletedAt.getTime()
+    ) {
+      return false;
+    }
+
+    if (where.status !== undefined) {
+      if (
+        typeof where.status === "string" &&
+        property.status !== where.status
+      ) {
+        return false;
+      }
+
+      if (
+        typeof where.status === "object" &&
+        !where.status.in.includes(property.status)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  propertyDelegate.findFirst = async (
+    args: FindPropertyArgs,
+  ): Promise<Property | null> => {
+    const property = properties.find((candidate) =>
+      matchesPropertyWhere(candidate, args.where),
+    );
+
+    return property ? { ...property } : null;
+  };
+
+  propertyDelegate.create = async (
+    args: CreatePropertyArgs,
+  ): Promise<Property> => {
+    const nextId =
+      properties.length > 0
+        ? Math.max(...properties.map((property) => property.id)) + 1
+        : 1;
+    const now = new Date();
+    const data = args.data;
+    const year = now.getUTCFullYear();
+    const property: Property = {
+      id: nextId,
+      agentId: data.agentId,
+      code:
+        typeof data.code === "string"
+          ? data.code
+          : `HK-${year}-${String(nextId).padStart(6, "0")}`,
+      title: data.title,
+      propertyType: data.propertyType,
+      listingType: data.listingType,
+      status: data.status ?? PropertyStatus.ACTIVE,
+      description: data.description ?? null,
+      ownerName: data.ownerName,
+      ownerPhone: data.ownerPhone,
+      ownerEmail: data.ownerEmail ?? null,
+      address: data.address,
+      neighborhood: data.neighborhood ?? null,
+      city: data.city,
+      state: data.state,
+      latitude: asDecimal(data.latitude),
+      longitude: asDecimal(data.longitude),
+      price: asDecimal(data.price),
+      currency: data.currency ?? Currency.USD,
+      maintenanceFee:
+        data.maintenanceFee === undefined || data.maintenanceFee === null
+          ? null
+          : asDecimal(data.maintenanceFee),
+      isNegotiable: data.isNegotiable ?? false,
+      bedrooms: data.bedrooms,
+      bathrooms: data.bathrooms,
+      parkingSpaces: data.parkingSpaces,
+      squareMeters: asDecimal(data.squareMeters),
+      lotSquareMeters:
+        data.lotSquareMeters === undefined || data.lotSquareMeters === null
+          ? null
+          : asDecimal(data.lotSquareMeters),
+      yearBuilt: data.yearBuilt ?? null,
+      apartmentFloor: data.apartmentFloor ?? null,
+      hasWaterTank: data.hasWaterTank ?? false,
+      hasPowerPlant: data.hasPowerPlant ?? false,
+      isFurnished: data.isFurnished ?? false,
+      allowsPets: data.allowsPets ?? false,
+      hasPool: data.hasPool ?? false,
+      hasGym: data.hasGym ?? false,
+      hasBalcony: data.hasBalcony ?? false,
+      hasAirConditioning: data.hasAirConditioning ?? false,
+      hasSecurity: data.hasSecurity ?? false,
+      hasElevator: data.hasElevator ?? false,
+      videoUrl: data.videoUrl ?? null,
+      virtualTourUrl: data.virtualTourUrl ?? null,
+      closedAt:
+        data.closedAt === undefined || data.closedAt === null
+          ? null
+          : new Date(data.closedAt),
+      createdAt: data.createdAt instanceof Date ? data.createdAt : now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    properties.push(property);
+    return { ...property };
+  };
+
+  propertyDelegate.update = async (
+    args: UpdatePropertyArgs,
+  ): Promise<Property> => {
+    const property = properties.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!property) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(property, args.data, { updatedAt: new Date() });
+    return { ...property };
+  };
+
   propertyDelegate.count = async (
     args: CountPropertiesArgs,
   ): Promise<number> => {
-    return agentPropertyCounts.get(args.where.agentId) ?? 0;
+    if (args.where.agentId !== undefined) {
+      const manuallyConfiguredCount = agentPropertyCounts.get(
+        args.where.agentId,
+      );
+
+      if (manuallyConfiguredCount !== undefined) {
+        return manuallyConfiguredCount;
+      }
+    }
+
+    return properties.filter((property) =>
+      matchesPropertyWhere(property, args.where),
+    ).length;
   };
 
   revokedTokenDelegate.findUnique = async (
@@ -1311,6 +1505,7 @@ export const createMockDatabase = (): MockDatabase => {
 
   return {
     users,
+    properties,
     revokedTokens,
     passwordResetTokens,
     loginAttempts,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const PHOTO_URL_MAX_LENGTH = 2048;
+const PUBLIC_URL_MAX_LENGTH = 2048;
 
 const isPrivateIpv4 = (hostname: string): boolean => {
   const parts = hostname.split(".");
@@ -77,25 +77,43 @@ const parseUrl = (value: string): URL | null => {
   }
 };
 
-export const photoUrlSchema = z
-  .string({ error: "La URL de la foto debe ser un texto." })
-  .trim()
-  .max(
-    PHOTO_URL_MAX_LENGTH,
-    `La URL de la foto no puede tener más de ${PHOTO_URL_MAX_LENGTH} caracteres.`,
-  )
-  .url("Debes ingresar una URL válida para la foto.")
-  .refine((value) => {
-    const url = parseUrl(value);
-    return url !== null && (url.protocol === "http:" || url.protocol === "https:");
-  }, "La URL de la foto debe usar http o https.")
-  .refine((value) => {
-    const url = parseUrl(value);
-    return url !== null && url.username === "" && url.password === "";
-  }, "La URL de la foto no puede incluir credenciales.")
-  .refine((value) => {
-    const url = parseUrl(value);
-    return url === null || !isPrivateHostname(url.hostname);
-  }, "La URL de la foto no puede apuntar a una dirección privada o local.")
+export interface PublicUrlSchemaOptions {
+  maxLength?: number;
+  httpsOnly?: boolean;
+}
+
+// Shared validation for externally hosted media links. The backend never
+// downloads these URLs; the rules prevent unsafe schemes, credentials and
+// private hosts from reaching the browser contract.
+export const createPublicUrlSchema = (
+  urlLabel: string,
+  options: PublicUrlSchemaOptions = {},
+): z.ZodString => {
+  const maxLength = options.maxLength ?? PUBLIC_URL_MAX_LENGTH;
+  const protocols = options.httpsOnly ? ["https:"] : ["http:", "https:"];
+
+  return z
+    .string({ error: `${urlLabel} debe ser un texto.` })
+    .trim()
+    .max(
+      maxLength,
+      `${urlLabel} no puede tener más de ${maxLength} caracteres.`,
+    )
+    .url(`Debes ingresar una URL válida para ${urlLabel.toLowerCase()}.`)
+    .refine((value) => {
+      const url = parseUrl(value);
+      return url !== null && protocols.includes(url.protocol);
+    }, `${urlLabel} debe usar ${protocols.map((protocol) => protocol.slice(0, -1)).join(" o ")}.`)
+    .refine((value) => {
+      const url = parseUrl(value);
+      return url !== null && url.username === "" && url.password === "";
+    }, `${urlLabel} no puede incluir credenciales.`)
+    .refine((value) => {
+      const url = parseUrl(value);
+      return url === null || !isPrivateHostname(url.hostname);
+    }, `${urlLabel} no puede apuntar a una dirección privada o local.`);
+};
+
+export const photoUrlSchema = createPublicUrlSchema("La URL de la foto")
   .nullable()
   .optional();
