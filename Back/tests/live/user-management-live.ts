@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import type { Express } from "express";
 import request from "supertest";
-import { Role } from "@prisma/client";
+import { ListingType, PropertyType, Role } from "@prisma/client";
 import { createApp } from "../../src/app";
 import { prisma } from "../../src/config/database";
 import type { OutgoingMail } from "../../src/utils/mailer";
@@ -21,6 +21,7 @@ import { processEmailOutboxBatch } from "../../src/services/email-outbox-service
 import { hashPassword } from "../../src/utils/password";
 
 const LIVE_SUFFIX = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+const LIVE_PROPERTY_CODE = `HK-${new Date().getUTCFullYear()}-${Date.now()}`;
 const LIVE_ADMIN_PASSWORD = "Live-Admin-Password1!";
 const LIVE_PARTNER_PASSWORD = "Live-Partner-Password1!";
 const LIVE_CHANGED_PASSWORD = "Live-Changed-Password1!";
@@ -150,16 +151,21 @@ const run = async (): Promise<void> => {
   const property = await prisma.property.create({
     data: {
       agentId: agentUser.id,
-      code: `LIVE-${LIVE_SUFFIX}`,
-      category: "House",
+      code: LIVE_PROPERTY_CODE,
+      title: "Live property",
+      propertyType: PropertyType.HOUSE,
+      listingType: ListingType.SALE,
+      ownerName: "Live Owner",
+      ownerPhone: "00000000",
       city: "Caracas",
       state: "Distrito Capital",
       address: "Av. Principal",
+      latitude: 10.1234567,
+      longitude: -66.1234567,
       price: 100000,
       bathrooms: 2,
       bedrooms: 3,
       parkingSpaces: 1,
-      type: "Sale",
       squareMeters: 120,
     },
   });

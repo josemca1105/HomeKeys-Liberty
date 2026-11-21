@@ -6,15 +6,16 @@
  * ORM: Prisma Client
  * Models:
  * 1. User               — System users (agents and administrators)
- * 2. Property           — Real estate properties
- * 3. Photo              — Property photos
+ * 2. Property           — Captured real estate properties
+ * 3. Photo              — Property photos stored in object storage
  * 4. RevokedToken       — Revoked JWT blocklist
  * 5. PasswordResetToken — Temporary password reset tokens
  * Enums:
  * - Role:           ADMIN, PARTNER
- * - Category:       House, Apartment, Commercial
- * - PropertyType:   Sale, Rent
- * - PropertyStatus: Active, Inactive
+ * - PropertyType:   HOUSE, APARTMENT, TOWNHOUSE, LAND, COMMERCIAL, OFFICE, WAREHOUSE, FARM
+ * - ListingType:    SALE, RENT
+ * - PropertyStatus: ACTIVE, PAUSED, CLOSED
+ * - Currency:       USD
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -37,20 +38,30 @@ enum AuditScope {
   BUSINESS
 }
 
-enum Category {
-  House
-  Apartment
-  Commercial
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  TOWNHOUSE
+  LAND
+  COMMERCIAL
+  OFFICE
+  WAREHOUSE
+  FARM
 }
 
-enum PropertyType {
-  Sale
-  Rent
+enum ListingType {
+  SALE
+  RENT
 }
 
 enum PropertyStatus {
-  Active
-  Inactive
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum Currency {
+  USD
 }
 
 enum EmailType {
@@ -99,41 +110,83 @@ model User {
   @@map("users")
 }
 
+// A captured property is always assigned to a PARTNER. The owner is an
+// external contact and deliberately does not require a User account.
 model Property {
-  id            Int            @id @default(autoincrement())
-  agentId       Int            @map("agent_id")
-  code          String         @unique @db.VarChar(50)
-  category      Category
-  city          String         @db.VarChar(100)
-  state         String         @db.VarChar(100)
-  address       String         @db.Text
-  price         Decimal        @db.Decimal(12, 2)
-  description   String?        @db.Text
-  bathrooms     Int
-  bedrooms      Int
-  parkingSpaces Int            @map("parking_spaces")
-  type          PropertyType
-  squareMeters  Decimal        @map("square_meters") @db.Decimal(10, 2)
-  status        PropertyStatus @default(Active)
+  id           Int            @id @default(autoincrement())
+  agentId      Int            @map("agent_id")
+  code         String         @unique @db.VarChar(50)
+  title        String         @db.VarChar(200)
+  propertyType PropertyType   @map("property_type")
+  listingType  ListingType    @map("listing_type")
+  status       PropertyStatus @default(ACTIVE)
+  description  String?        @db.Text
 
-  apartmentFloor Int?     @map("apartment_floor")
-  hasElevator    Boolean? @map("has_elevator")
-  hasPowerPlant  Boolean? @map("has_power_plant")
+  ownerName  String  @map("owner_name") @db.VarChar(150)
+  ownerPhone String  @map("owner_phone") @db.VarChar(20)
+  ownerEmail String? @map("owner_email") @db.Citext
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  address      String  @db.Text
+  neighborhood String? @db.VarChar(100)
+  city         String  @db.VarChar(100)
+  state        String  @db.VarChar(100)
+  latitude     Decimal @db.Decimal(10, 7)
+  longitude    Decimal @db.Decimal(10, 7)
+
+  price          Decimal  @db.Decimal(12, 2)
+  currency       Currency @default(USD)
+  maintenanceFee Decimal? @map("maintenance_fee") @db.Decimal(12, 2)
+  isNegotiable   Boolean  @default(false) @map("is_negotiable")
+
+  bedrooms        Int
+  bathrooms       Int
+  parkingSpaces   Int      @map("parking_spaces")
+  squareMeters    Decimal  @map("square_meters") @db.Decimal(10, 2)
+  lotSquareMeters Decimal? @map("lot_square_meters") @db.Decimal(12, 2)
+  yearBuilt       Int?     @map("year_built")
+  apartmentFloor  Int?     @map("apartment_floor")
+
+  hasWaterTank       Boolean @default(false) @map("has_water_tank")
+  hasPowerPlant      Boolean @default(false) @map("has_power_plant")
+  isFurnished        Boolean @default(false) @map("is_furnished")
+  allowsPets         Boolean @default(false) @map("allows_pets")
+  hasPool            Boolean @default(false) @map("has_pool")
+  hasGym             Boolean @default(false) @map("has_gym")
+  hasBalcony         Boolean @default(false) @map("has_balcony")
+  hasAirConditioning Boolean @default(false) @map("has_air_conditioning")
+  hasSecurity        Boolean @default(false) @map("has_security")
+  hasElevator        Boolean @default(false) @map("has_elevator")
+
+  videoUrl       String? @map("video_url") @db.Text
+  virtualTourUrl String? @map("virtual_tour_url") @db.Text
+
+  closedAt  DateTime? @map("closed_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   agent  User    @relation(fields: [agentId], references: [id])
   photos Photo[]
 
-  @@index([agentId])
+  @@index([agentId, createdAt])
+  @@index([status, listingType, propertyType])
+  @@index([state, city])
+  @@index([createdAt, id])
   @@map("properties")
 }
 
+// Binary content lives in object storage. PostgreSQL only keeps the durable
+// object key and metadata needed to authorize, order and render each photo.
 model Photo {
   id         Int     @id @default(autoincrement())
   propertyId Int     @map("property_id")
-  imageUrl   String  @map("image_url")
+  storageKey String  @unique @map("storage_key") @db.VarChar(500)
+  mimeType   String  @map("mime_type") @db.VarChar(100)
+  sizeBytes  Int     @map("size_bytes")
+  width      Int
+  height     Int
+  altText    String? @map("alt_text") @db.VarChar(300)
+  sortOrder  Int     @default(0) @map("sort_order")
   isCover    Boolean @default(false) @map("is_cover")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -141,7 +194,8 @@ model Photo {
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
-  @@index([propertyId])
+  // A separate partial unique index guarantees one cover per property.
+  @@index([propertyId, sortOrder])
   @@map("photos")
 }
 
