@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
@@ -11,6 +11,12 @@ import type { AuthUser } from '@/features/auth/auth.types'
 import { createTestToken, testProperty, testUser } from '@/test/fixtures'
 import { server } from '@/test/msw/server'
 import { renderApp } from '@/test/render-app'
+
+vi.mock('@/features/properties/map/property-map-canvas', () => ({
+  PropertyMapCanvas: ({ ariaLabel }: { ariaLabel: string }) => (
+    <div role="region" aria-label={ariaLabel} />
+  ),
+}))
 
 const currentUserUrl = `${env.apiBaseUrl}/users/me`
 const usersUrl = `${env.apiBaseUrl}/users`
@@ -135,6 +141,11 @@ describe('consulta de captaciones', () => {
       'href',
       expect.stringContaining('openstreetmap.org'),
     )
+    expect(
+      await screen.findByRole('region', {
+        name: 'Mapa de ubicación de Casa familiar en El Viñedo',
+      }),
+    ).toBeInTheDocument()
   })
 
   it('mantiene el alcance del PARTNER sin consultar la lista de usuarios', async () => {

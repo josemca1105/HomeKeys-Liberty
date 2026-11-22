@@ -44,6 +44,7 @@ import {
 } from '../property-queries'
 import type { Property } from '../property.types'
 import { PropertyStatusBadge } from '../components/property-status-badge'
+import { PropertyLocationMap } from '../map/property-location-map'
 
 function DetailLoading() {
   return (
@@ -438,11 +439,20 @@ export function PropertyDetailPage() {
                   value={property.longitude.toFixed(7)}
                 />
               </dl>
+
+              <div className="mt-5">
+                <PropertyLocationMap
+                  latitude={property.latitude}
+                  longitude={property.longitude}
+                  title={property.title}
+                />
+              </div>
+
               <a
                 href={getOpenStreetMapUrl(property)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-5 inline-flex min-h-12 items-center gap-2 rounded-lg text-sm font-semibold text-brand-700 hover:text-brand-900"
+                className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-lg text-sm font-semibold text-brand-700 hover:text-brand-900"
               >
                 <MapPin aria-hidden="true" className="size-4" />
                 Abrir ubicación en OpenStreetMap

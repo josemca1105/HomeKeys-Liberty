@@ -1,0 +1,19 @@
+.homekeys-map .maplibregl-ctrl-group button {
+  width: 48px;
+  height: 48px;
+}
+
+.homekeys-map .maplibregl-ctrl-attrib {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.homekeys-map .maplibregl-ctrl-attrib a {
+  color: inherit;
+}
+
+.homekeys-map .maplibregl-canvas:focus-visible {
+  outline: 3px solid var(--color-brand-cyan);
+  outline-offset: -3px;
+}
