@@ -1,6 +1,7 @@
 import { AuditScope, EmailType, Prisma, Role } from "@prisma/client";
 import { prisma } from "../config/database";
 import { environment } from "../config/env";
+import { countOpenPropertiesByAgentId } from "../repositories/property-repository";
 import {
   countActiveUsersByRole,
   countPropertiesByAgentId,
@@ -127,6 +128,15 @@ const userHasPropertiesError = (): AppError => {
     code: "USER_HAS_PROPERTIES",
     message:
       "El usuario tiene propiedades registradas y por eso no puede eliminarse.",
+  });
+};
+
+const userHasOpenPropertiesError = (): AppError => {
+  return new AppError({
+    statusCode: 409,
+    code: "USER_HAS_OPEN_PROPERTIES",
+    message:
+      "El PARTNER tiene captaciones activas o pausadas. Reasígnalas antes de desactivar la cuenta.",
   });
 };
 
@@ -470,6 +480,17 @@ export const updateUserByAdmin = async (
           input.isActive === false && targetUser.isActive;
         const isReactivating =
           input.isActive === true && !targetUser.isActive;
+
+        if (isDeactivating && targetUser.role === Role.PARTNER) {
+          const openPropertyCount = await countOpenPropertiesByAgentId(
+            targetUserId,
+            transaction,
+          );
+
+          if (openPropertyCount > 0) {
+            throw userHasOpenPropertiesError();
+          }
+        }
 
         // Only active administrators keep the system operable: demoting or
         // deactivating the last one would leave no one able to manage users.

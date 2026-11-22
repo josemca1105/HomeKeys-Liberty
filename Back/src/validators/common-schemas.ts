@@ -33,14 +33,20 @@ export const phoneSchema = createRequiredStringSchema(
     { message: "El teléfono debe tener entre 6 y 15 dígitos." },
   );
 
-export const createPersonNameSchema = (fieldLabel: string): z.ZodString => {
+export const createPersonNameSchema = (
+  fieldLabel: string,
+  maxLength = 100,
+): z.ZodString => {
   return createRequiredStringSchema(
     `El ${fieldLabel} es obligatorio.`,
     `El ${fieldLabel} debe ser un texto.`,
   )
     .trim()
     .min(1, `El ${fieldLabel} es obligatorio.`)
-    .max(100, `El ${fieldLabel} no puede tener más de 100 caracteres.`)
+    .max(
+      maxLength,
+      `El ${fieldLabel} no puede tener más de ${maxLength} caracteres.`,
+    )
     .refine((value) => !/\p{Cc}/u.test(value), {
       message: `El ${fieldLabel} no puede contener caracteres de control.`,
     })
