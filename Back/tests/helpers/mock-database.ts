@@ -1,4 +1,11 @@
-import { Currency, Prisma, PropertyStatus, Role } from "@prisma/client";
+import {
+  Currency,
+  Prisma,
+  PropertyPhotoBatchStatus,
+  PropertyPhotoUploadStatus,
+  PropertyStatus,
+  Role,
+} from "@prisma/client";
 import type {
   AuditLog,
   AuditScope,
@@ -8,11 +15,15 @@ import type {
   LoginAttempt,
   PasswordHistory,
   PasswordResetToken,
+  Photo,
   Property,
+  PropertyPhotoBatch,
+  PropertyPhotoUpload,
   RevokedToken,
   User,
 } from "@prisma/client";
 import bcrypt from "bcrypt";
+import { randomUUID } from "node:crypto";
 import { prisma } from "../../src/config/database";
 
 // The automated suite must never reach the real SMTP transport.
@@ -72,8 +83,19 @@ interface CountUsersArgs {
 interface PropertyWhereMock {
   id?: number;
   agentId?: number;
+  code?: string;
   deletedAt?: Date | null;
   status?: PropertyStatus | { in: PropertyStatus[] };
+  propertyType?: string;
+  listingType?: string;
+  city?: string | { equals?: string; mode?: string };
+  state?: string | { equals?: string; mode?: string };
+  neighborhood?: { contains?: string; mode?: string };
+  bedrooms?: { gte?: number };
+  bathrooms?: { gte?: number };
+  parkingSpaces?: { gte?: number };
+  price?: { gte?: Prisma.Decimal; lte?: Prisma.Decimal };
+  OR?: Array<Record<string, unknown>>;
 }
 
 interface CountPropertiesArgs {
@@ -84,6 +106,13 @@ interface FindPropertyArgs {
   where: PropertyWhereMock;
 }
 
+interface FindManyPropertiesArgs {
+  where: PropertyWhereMock;
+  orderBy?: Array<Record<string, "asc" | "desc">>;
+  skip?: number;
+  take?: number;
+}
+
 interface CreatePropertyArgs {
   data: Prisma.PropertyUncheckedCreateInput;
 }
@@ -91,6 +120,93 @@ interface CreatePropertyArgs {
 interface UpdatePropertyArgs {
   where: { id: number };
   data: Prisma.PropertyUncheckedUpdateInput;
+}
+
+interface PhotoWhereMock {
+  id?: number;
+  propertyId?: number | { in: number[] };
+  isCover?: boolean;
+}
+
+interface FindManyPhotosArgs {
+  where: PhotoWhereMock;
+  orderBy?: Array<Record<string, "asc" | "desc">>;
+}
+
+interface CreatePhotoArgs {
+  data: Prisma.PhotoUncheckedCreateInput;
+}
+
+interface UpdatePhotoArgs {
+  where: { id: number };
+  data: Prisma.PhotoUncheckedUpdateInput;
+}
+
+interface UpdateManyPhotosArgs {
+  where: PhotoWhereMock;
+  data: Partial<Photo>;
+}
+
+interface PhotoDelegateMock {
+  findMany: (args: FindManyPhotosArgs) => Promise<Photo[]>;
+  findFirst: (args: { where: PhotoWhereMock }) => Promise<Photo | null>;
+  count: (args: { where: PhotoWhereMock }) => Promise<number>;
+  create: (args: CreatePhotoArgs) => Promise<Photo>;
+  update: (args: UpdatePhotoArgs) => Promise<Photo>;
+  updateMany: (args: UpdateManyPhotosArgs) => Promise<{ count: number }>;
+  delete: (args: { where: { id: number } }) => Promise<Photo>;
+}
+
+interface PhotoUploadWhereMock {
+  id?: string | { in: string[] };
+  batchId?: string;
+  status?: PropertyPhotoUploadStatus;
+}
+
+interface PhotoBatchDelegateMock {
+  create: (args: {
+    data: { userId: number; expiresAt: Date };
+  }) => Promise<PropertyPhotoBatch>;
+  findUnique: (args: {
+    where: { id: string };
+    include?: { uploads: unknown };
+  }) => Promise<
+    (PropertyPhotoBatch & { uploads?: PropertyPhotoUpload[] }) | null
+  >;
+  findMany: (args: {
+    where: {
+      status: PropertyPhotoBatchStatus;
+      expiresAt: { lte: Date };
+    };
+    include?: { uploads: unknown };
+  }) => Promise<Array<PropertyPhotoBatch & { uploads: PropertyPhotoUpload[] }>>;
+  update: (args: {
+    where: { id: string };
+    data: Partial<PropertyPhotoBatch>;
+  }) => Promise<PropertyPhotoBatch>;
+  delete: (args: { where: { id: string } }) => Promise<PropertyPhotoBatch>;
+}
+
+interface PhotoUploadDelegateMock {
+  create: (args: {
+    data: Prisma.PropertyPhotoUploadUncheckedCreateInput;
+  }) => Promise<PropertyPhotoUpload>;
+  findMany: (args: {
+    where: PhotoUploadWhereMock;
+    orderBy?: Array<Record<string, "asc" | "desc">>;
+  }) => Promise<PropertyPhotoUpload[]>;
+  findFirst: (args: {
+    where: PhotoUploadWhereMock;
+  }) => Promise<PropertyPhotoUpload | null>;
+  update: (args: {
+    where: { id: string };
+    data: Partial<PropertyPhotoUpload>;
+  }) => Promise<PropertyPhotoUpload>;
+  updateMany: (args: {
+    where: PhotoUploadWhereMock;
+    data: Partial<PropertyPhotoUpload>;
+  }) => Promise<{ count: number }>;
+  delete: (args: { where: { id: string } }) => Promise<PropertyPhotoUpload>;
 }
 
 interface FindRevokedTokenArgs {
@@ -191,6 +307,7 @@ interface UserDelegateMock {
 
 interface PropertyDelegateMock {
   count: (args: CountPropertiesArgs) => Promise<number>;
+  findMany: (args: FindManyPropertiesArgs) => Promise<Property[]>;
   findFirst: (args: FindPropertyArgs) => Promise<Property | null>;
   create: (args: CreatePropertyArgs) => Promise<Property>;
   update: (args: UpdatePropertyArgs) => Promise<Property>;
@@ -271,6 +388,9 @@ interface AuditLogDelegateMock {
 interface TransactionClientMock {
   user: UserDelegateMock;
   property: PropertyDelegateMock;
+  photo: PhotoDelegateMock;
+  propertyPhotoBatch: PhotoBatchDelegateMock;
+  propertyPhotoUpload: PhotoUploadDelegateMock;
   revokedToken: RevokedTokenDelegateMock;
   passwordResetToken: PasswordResetTokenDelegateMock;
   loginAttempt: LoginAttemptDelegateMock;
@@ -360,6 +480,9 @@ interface EmailOutboxDelegateMock {
 export interface MockDatabase {
   users: User[];
   properties: Property[];
+  photos: Photo[];
+  propertyPhotoBatches: PropertyPhotoBatch[];
+  propertyPhotoUploads: PropertyPhotoUpload[];
   revokedTokens: RevokedToken[];
   passwordResetTokens: PasswordResetToken[];
   loginAttempts: LoginAttempt[];
@@ -379,6 +502,13 @@ export interface MockDatabase {
     password: string;
   }) => User;
   setAgentPropertyCount: (agentId: number, propertyCount: number) => void;
+  addReadyPhotoBatch: (
+    userId: number,
+    count?: number,
+  ) => {
+    batch: PropertyPhotoBatch;
+    uploads: PropertyPhotoUpload[];
+  };
 }
 
 const createUser = (
@@ -441,6 +571,9 @@ export const createMockDatabase = (): MockDatabase => {
     createUser(2, "partner@example.com", Role.PARTNER, PARTNER_PASSWORD_HASH),
   ];
   const properties: Property[] = [];
+  const photos: Photo[] = [];
+  const propertyPhotoBatches: PropertyPhotoBatch[] = [];
+  const propertyPhotoUploads: PropertyPhotoUpload[] = [];
   const revokedTokens: RevokedToken[] = [];
   const passwordResetTokens: PasswordResetToken[] = [];
   const loginAttempts: LoginAttempt[] = [];
@@ -457,6 +590,11 @@ export const createMockDatabase = (): MockDatabase => {
 
   const userDelegate = prisma.user as unknown as UserDelegateMock;
   const propertyDelegate = prisma.property as unknown as PropertyDelegateMock;
+  const photoDelegate = prisma.photo as unknown as PhotoDelegateMock;
+  const photoBatchDelegate =
+    prisma.propertyPhotoBatch as unknown as PhotoBatchDelegateMock;
+  const photoUploadDelegate =
+    prisma.propertyPhotoUpload as unknown as PhotoUploadDelegateMock;
   const revokedTokenDelegate =
     prisma.revokedToken as unknown as RevokedTokenDelegateMock;
   const passwordResetTokenDelegate =
@@ -944,6 +1082,48 @@ export const createMockDatabase = (): MockDatabase => {
     throw new Error("Invalid decimal value in property mock.");
   };
 
+  const containsInsensitive = (
+    value: string,
+    expected: string,
+  ): boolean => value.toLowerCase().includes(expected.toLowerCase());
+
+  const matchesTextCondition = (
+    value: string,
+    condition: unknown,
+  ): boolean => {
+    if (typeof condition === "string") {
+      return value === condition;
+    }
+
+    if (typeof condition === "object" && condition !== null) {
+      const contains = (condition as { contains?: unknown }).contains;
+      return typeof contains === "string"
+        ? containsInsensitive(value, contains)
+        : true;
+    }
+
+    return true;
+  };
+
+  const matchesOrCondition = (
+    property: Property,
+    condition: Record<string, unknown>,
+  ): boolean => {
+    return Object.entries(condition).some(([field, value]) => {
+      if (field === "ownerPhone") {
+        return matchesTextCondition(property.ownerPhone, value);
+      }
+
+      const propertyValue = (property as unknown as Record<string, unknown>)[
+        field
+      ];
+
+      return typeof propertyValue === "string"
+        ? matchesTextCondition(propertyValue, value)
+        : false;
+    });
+  };
+
   const matchesPropertyWhere = (
     property: Property,
     where: PropertyWhereMock,
@@ -956,10 +1136,11 @@ export const createMockDatabase = (): MockDatabase => {
       return false;
     }
 
-    if (
-      where.deletedAt === null &&
-      property.deletedAt !== null
-    ) {
+    if (where.code !== undefined && property.code !== where.code) {
+      return false;
+    }
+
+    if (where.deletedAt === null && property.deletedAt !== null) {
       return false;
     }
 
@@ -986,7 +1167,136 @@ export const createMockDatabase = (): MockDatabase => {
       }
     }
 
+    if (
+      where.propertyType !== undefined &&
+      property.propertyType !== where.propertyType
+    ) {
+      return false;
+    }
+
+    if (
+      where.listingType !== undefined &&
+      property.listingType !== where.listingType
+    ) {
+      return false;
+    }
+
+    for (const field of ["city", "state"] as const) {
+      const filter = where[field];
+
+      if (filter === undefined) {
+        continue;
+      }
+
+      const expected =
+        typeof filter === "string"
+          ? filter
+          : filter.equals ?? "";
+      const actual = property[field];
+
+      if (
+        expected !== "" &&
+        (typeof filter === "string" || filter.mode === "insensitive"
+          ? !containsInsensitive(actual, expected)
+          : actual !== expected)
+      ) {
+        return false;
+      }
+    }
+
+    if (
+      where.neighborhood?.contains !== undefined &&
+      !containsInsensitive(
+        property.neighborhood ?? "",
+        where.neighborhood.contains,
+      )
+    ) {
+      return false;
+    }
+
+    for (const field of [
+      "bedrooms",
+      "bathrooms",
+      "parkingSpaces",
+    ] as const) {
+      const minimum = where[field]?.gte;
+
+      if (minimum !== undefined && property[field] < minimum) {
+        return false;
+      }
+    }
+
+    if (where.price?.gte !== undefined) {
+      if (Number(property.price) < Number(where.price.gte)) {
+        return false;
+      }
+    }
+
+    if (where.price?.lte !== undefined) {
+      if (Number(property.price) > Number(where.price.lte)) {
+        return false;
+      }
+    }
+
+    if (
+      where.OR !== undefined &&
+      !where.OR.some((condition) =>
+        matchesOrCondition(property, condition),
+      )
+    ) {
+      return false;
+    }
+
     return true;
+  };
+
+  const compareOrderValues = (
+    first: unknown,
+    second: unknown,
+  ): number => {
+    if (first instanceof Date && second instanceof Date) {
+      return first.getTime() - second.getTime();
+    }
+
+    if (
+      typeof first === "object" &&
+      first !== null &&
+      "comparedTo" in first &&
+      typeof (first as { comparedTo?: unknown }).comparedTo === "function"
+    ) {
+      return (
+        first as { comparedTo: (value: unknown) => number }
+      ).comparedTo(second);
+    }
+
+    if (typeof first === "number" && typeof second === "number") {
+      return first - second;
+    }
+
+    return String(first).localeCompare(String(second));
+  };
+
+  const sortByOrder = <T extends Record<string, unknown>>(
+    items: T[],
+    orderBy: Array<Record<string, "asc" | "desc">> | undefined,
+  ): T[] => {
+    if (!orderBy) {
+      return items;
+    }
+
+    return [...items].sort((first, second) => {
+      for (const order of orderBy) {
+        for (const [field, direction] of Object.entries(order)) {
+          const comparison = compareOrderValues(first[field], second[field]);
+
+          if (comparison !== 0) {
+            return direction === "asc" ? comparison : -comparison;
+          }
+        }
+      }
+
+      return 0;
+    });
   };
 
   propertyDelegate.findFirst = async (
@@ -999,6 +1309,24 @@ export const createMockDatabase = (): MockDatabase => {
     return property ? { ...property } : null;
   };
 
+  propertyDelegate.findMany = async (
+    args: FindManyPropertiesArgs,
+  ): Promise<Property[]> => {
+    const matching = properties.filter((property) =>
+      matchesPropertyWhere(property, args.where),
+    );
+    const sorted = sortByOrder(
+      matching as unknown as Array<Record<string, unknown>>,
+      args.orderBy,
+    ) as unknown as Property[];
+    const skip = args.skip ?? 0;
+    const take = args.take ?? sorted.length;
+
+    return sorted.slice(skip, skip + take).map((property) => ({
+      ...property,
+    }));
+  };
+
   propertyDelegate.create = async (
     args: CreatePropertyArgs,
   ): Promise<Property> => {
@@ -1008,14 +1336,13 @@ export const createMockDatabase = (): MockDatabase => {
         : 1;
     const now = new Date();
     const data = args.data;
-    const year = now.getUTCFullYear();
     const property: Property = {
       id: nextId,
       agentId: data.agentId,
       code:
         typeof data.code === "string"
           ? data.code
-          : `HK-${year}-${String(nextId).padStart(6, "0")}`,
+          : `HK-${String(nextId).padStart(4, "0")}`,
       title: data.title,
       propertyType: data.propertyType,
       listingType: data.listingType,
@@ -1106,6 +1433,389 @@ export const createMockDatabase = (): MockDatabase => {
     return properties.filter((property) =>
       matchesPropertyWhere(property, args.where),
     ).length;
+  };
+
+  const matchesPhotoWhere = (photo: Photo, where: PhotoWhereMock): boolean => {
+    if (where.id !== undefined && photo.id !== where.id) {
+      return false;
+    }
+
+    if (typeof where.propertyId === "number") {
+      if (photo.propertyId !== where.propertyId) {
+        return false;
+      }
+    } else if (
+      where.propertyId !== undefined &&
+      !where.propertyId.in.includes(photo.propertyId)
+    ) {
+      return false;
+    }
+
+    if (where.isCover !== undefined && photo.isCover !== where.isCover) {
+      return false;
+    }
+
+    return true;
+  };
+
+  photoDelegate.findMany = async (
+    args: FindManyPhotosArgs,
+  ): Promise<Photo[]> => {
+    const matching = photos.filter((photo) =>
+      matchesPhotoWhere(photo, args.where),
+    );
+    const sorted = sortByOrder(
+      matching as unknown as Array<Record<string, unknown>>,
+      args.orderBy,
+    ) as unknown as Photo[];
+
+    return sorted.map((photo) => ({ ...photo }));
+  };
+
+  photoDelegate.findFirst = async (args: {
+    where: PhotoWhereMock;
+  }): Promise<Photo | null> => {
+    const photo = photos.find((candidate) =>
+      matchesPhotoWhere(candidate, args.where),
+    );
+
+    return photo ? { ...photo } : null;
+  };
+
+  photoDelegate.count = async (args: {
+    where: PhotoWhereMock;
+  }): Promise<number> => {
+    return photos.filter((photo) => matchesPhotoWhere(photo, args.where))
+      .length;
+  };
+
+  photoDelegate.create = async (
+    args: CreatePhotoArgs,
+  ): Promise<Photo> => {
+    const nextId =
+      photos.length > 0
+        ? Math.max(...photos.map((photo) => photo.id)) + 1
+        : 1;
+    const now = new Date();
+    const photo: Photo = {
+      id: nextId,
+      propertyId: args.data.propertyId,
+      storageKey: args.data.storageKey,
+      mimeType: args.data.mimeType,
+      sizeBytes: args.data.sizeBytes,
+      width: args.data.width,
+      height: args.data.height,
+      altText: args.data.altText ?? null,
+      sortOrder: args.data.sortOrder ?? 0,
+      isCover: args.data.isCover ?? false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    photos.push(photo);
+    return { ...photo };
+  };
+
+  photoDelegate.update = async (
+    args: UpdatePhotoArgs,
+  ): Promise<Photo> => {
+    const photo = photos.find((candidate) => candidate.id === args.where.id);
+
+    if (!photo) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(photo, args.data, { updatedAt: new Date() });
+    return { ...photo };
+  };
+
+  photoDelegate.updateMany = async (
+    args: UpdateManyPhotosArgs,
+  ): Promise<{ count: number }> => {
+    const matching = photos.filter((photo) =>
+      matchesPhotoWhere(photo, args.where),
+    );
+
+    for (const photo of matching) {
+      Object.assign(photo, args.data, { updatedAt: new Date() });
+    }
+
+    return { count: matching.length };
+  };
+
+  photoDelegate.delete = async (args: {
+    where: { id: number };
+  }): Promise<Photo> => {
+    const index = photos.findIndex((photo) => photo.id === args.where.id);
+
+    if (index === -1) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    const [deleted] = photos.splice(index, 1);
+    return { ...(deleted as Photo) };
+  };
+
+  const matchesPhotoUploadWhere = (
+    upload: PropertyPhotoUpload,
+    where: PhotoUploadWhereMock,
+  ): boolean => {
+    if (typeof where.id === "string" && upload.id !== where.id) {
+      return false;
+    }
+
+    if (
+      typeof where.id === "object" &&
+      !where.id.in.includes(upload.id)
+    ) {
+      return false;
+    }
+
+    if (where.batchId !== undefined && upload.batchId !== where.batchId) {
+      return false;
+    }
+
+    if (where.status !== undefined && upload.status !== where.status) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const orderedUploadsForBatch = (batchId: string): PropertyPhotoUpload[] => {
+    return propertyPhotoUploads
+      .filter((upload) => upload.batchId === batchId)
+      .sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder ||
+          first.createdAt.getTime() - second.createdAt.getTime(),
+      );
+  };
+
+  photoBatchDelegate.create = async (
+    args,
+  ): Promise<PropertyPhotoBatch> => {
+    const now = new Date();
+    const batch: PropertyPhotoBatch = {
+      id: randomUUID(),
+      userId: args.data.userId,
+      status: PropertyPhotoBatchStatus.OPEN,
+      expiresAt: args.data.expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    propertyPhotoBatches.push(batch);
+    return { ...batch };
+  };
+
+  photoBatchDelegate.findUnique = async (args) => {
+    const batch = propertyPhotoBatches.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!batch) {
+      return null;
+    }
+
+    if (args.include) {
+      return {
+        ...batch,
+        uploads: orderedUploadsForBatch(batch.id).map((upload) => ({
+          ...upload,
+        })),
+      };
+    }
+
+    return { ...batch };
+  };
+
+  photoBatchDelegate.findMany = async (args) => {
+    return propertyPhotoBatches
+      .filter(
+        (batch) =>
+          batch.status === args.where.status &&
+          batch.expiresAt.getTime() <= args.where.expiresAt.lte.getTime(),
+      )
+      .map((batch) => ({
+        ...batch,
+        uploads: orderedUploadsForBatch(batch.id).map((upload) => ({
+          ...upload,
+        })),
+      }));
+  };
+
+  photoBatchDelegate.update = async (args) => {
+    const batch = propertyPhotoBatches.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!batch) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(batch, args.data, { updatedAt: new Date() });
+    return { ...batch };
+  };
+
+  photoBatchDelegate.delete = async (args) => {
+    const index = propertyPhotoBatches.findIndex(
+      (batch) => batch.id === args.where.id,
+    );
+
+    if (index === -1) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    const [deleted] = propertyPhotoBatches.splice(index, 1);
+
+    for (let i = propertyPhotoUploads.length - 1; i >= 0; i -= 1) {
+      if (propertyPhotoUploads[i]?.batchId === args.where.id) {
+        propertyPhotoUploads.splice(i, 1);
+      }
+    }
+
+    return { ...(deleted as PropertyPhotoBatch) };
+  };
+
+  photoUploadDelegate.create = async (args) => {
+    const now = new Date();
+    const upload: PropertyPhotoUpload = {
+      id: randomUUID(),
+      batchId: args.data.batchId,
+      storageKey: args.data.storageKey,
+      mimeType: args.data.mimeType,
+      sizeBytes: args.data.sizeBytes,
+      width: args.data.width,
+      height: args.data.height,
+      altText: args.data.altText ?? null,
+      sortOrder: args.data.sortOrder ?? 0,
+      status: PropertyPhotoUploadStatus.READY,
+      consumedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    propertyPhotoUploads.push(upload);
+    return { ...upload };
+  };
+
+  photoUploadDelegate.findMany = async (args) => {
+    const matching = propertyPhotoUploads.filter((upload) =>
+      matchesPhotoUploadWhere(upload, args.where),
+    );
+    const sorted = sortByOrder(
+      matching as unknown as Array<Record<string, unknown>>,
+      args.orderBy,
+    ) as unknown as PropertyPhotoUpload[];
+
+    return sorted.map((upload) => ({ ...upload }));
+  };
+
+  photoUploadDelegate.findFirst = async (args) => {
+    const upload = propertyPhotoUploads.find((candidate) =>
+      matchesPhotoUploadWhere(candidate, args.where),
+    );
+
+    return upload ? { ...upload } : null;
+  };
+
+  photoUploadDelegate.update = async (args) => {
+    const upload = propertyPhotoUploads.find(
+      (candidate) => candidate.id === args.where.id,
+    );
+
+    if (!upload) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    Object.assign(upload, args.data, { updatedAt: new Date() });
+    return { ...upload };
+  };
+
+  photoUploadDelegate.updateMany = async (args) => {
+    const matching = propertyPhotoUploads.filter((upload) =>
+      matchesPhotoUploadWhere(upload, args.where),
+    );
+
+    for (const upload of matching) {
+      Object.assign(upload, args.data, { updatedAt: new Date() });
+    }
+
+    return { count: matching.length };
+  };
+
+  photoUploadDelegate.delete = async (args) => {
+    const index = propertyPhotoUploads.findIndex(
+      (upload) => upload.id === args.where.id,
+    );
+
+    if (index === -1) {
+      throw new Prisma.PrismaClientKnownRequestError("Record not found", {
+        code: "P2025",
+        clientVersion: "6.19.3",
+      });
+    }
+
+    const [deleted] = propertyPhotoUploads.splice(index, 1);
+    return { ...(deleted as PropertyPhotoUpload) };
+  };
+
+  const createReadyPhotoBatch = (
+    userId: number,
+    count = 5,
+  ): {
+    batch: PropertyPhotoBatch;
+    uploads: PropertyPhotoUpload[];
+  } => {
+    const now = new Date();
+    const batch: PropertyPhotoBatch = {
+      id: randomUUID(),
+      userId,
+      status: PropertyPhotoBatchStatus.OPEN,
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+      createdAt: now,
+      updatedAt: now,
+    };
+    propertyPhotoBatches.push(batch);
+    const uploads: PropertyPhotoUpload[] = [];
+
+    for (let index = 0; index < count; index += 1) {
+      const upload: PropertyPhotoUpload = {
+        id: randomUUID(),
+        batchId: batch.id,
+        storageKey: `property-photo-batches/${batch.id}/photos/${randomUUID()}.webp`,
+        mimeType: "image/webp",
+        sizeBytes: 100,
+        width: 100,
+        height: 100,
+        altText: `Fixture ${index + 1}`,
+        sortOrder: index,
+        status: PropertyPhotoUploadStatus.READY,
+        consumedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      propertyPhotoUploads.push(upload);
+      uploads.push(upload);
+    }
+
+    return { batch: { ...batch }, uploads };
   };
 
   revokedTokenDelegate.findUnique = async (
@@ -1449,6 +2159,9 @@ export const createMockDatabase = (): MockDatabase => {
   const transactionClient: TransactionClientMock = {
     user: userDelegate,
     property: propertyDelegate,
+    photo: photoDelegate,
+    propertyPhotoBatch: photoBatchDelegate,
+    propertyPhotoUpload: photoUploadDelegate,
     revokedToken: revokedTokenDelegate,
     passwordResetToken: passwordResetTokenDelegate,
     loginAttempt: loginAttemptDelegate,
@@ -1506,6 +2219,9 @@ export const createMockDatabase = (): MockDatabase => {
   return {
     users,
     properties,
+    photos,
+    propertyPhotoBatches,
+    propertyPhotoUploads,
     revokedTokens,
     passwordResetTokens,
     loginAttempts,
@@ -1544,5 +2260,6 @@ export const createMockDatabase = (): MockDatabase => {
     setAgentPropertyCount: (agentId: number, propertyCount: number): void => {
       agentPropertyCounts.set(agentId, propertyCount);
     },
+    addReadyPhotoBatch: createReadyPhotoBatch,
   };
 };

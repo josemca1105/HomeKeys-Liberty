@@ -29,6 +29,8 @@ tags:
     description: User management. ADMIN-only except the current-user endpoints.
   - name: Audit
     description: Append-only security and business history.
+  - name: Properties
+    description: Property captures, internal ownership and photo management.
   - name: Health
     description: Public liveness and readiness probes.
 paths:
@@ -535,6 +537,710 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/property-photo-batches:
+    post:
+      tags: [Properties]
+      summary: Create a temporary pre-creation photo batch
+      description: |
+        Photos must be uploaded and confirmed before the capture exists. A
+        batch belongs to the authenticated user and expires after two hours.
+      responses:
+        "201":
+          description: Empty open batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoBatchResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/property-photo-batches/{batchId}:
+    parameters:
+      - $ref: "#/components/parameters/PhotoBatchId"
+    get:
+      tags: [Properties]
+      summary: Read an owned photo batch
+      responses:
+        "200":
+          description: Batch with its READY photos in order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoBatchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign batch (`PHOTO_BATCH_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Expired (`PHOTO_BATCH_EXPIRED`) or consumed (`PHOTO_BATCH_NOT_OPEN`) batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/property-photo-batches/{batchId}/photos/upload-url:
+    parameters:
+      - $ref: "#/components/parameters/PhotoBatchId"
+    post:
+      tags: [Properties]
+      summary: Create a pre-signed upload target inside a batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhotoUploadTargetRequest"
+      responses:
+        "200":
+          description: Short-lived upload target.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoUploadTargetResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign batch (`PHOTO_BATCH_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Batch closed/expired or twenty-photo limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/property-photo-batches/{batchId}/photos/confirm:
+    parameters:
+      - $ref: "#/components/parameters/PhotoBatchId"
+    post:
+      tags: [Properties]
+      summary: Validate and confirm a batch photo
+      description: Decodes the real image, strips EXIF/GPS and stores WebP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmBatchPhotoRequest"
+      responses:
+        "201":
+          description: READY temporary photo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoUploadResponse"
+        "400":
+          description: Invalid upload key (`INVALID_PHOTO_UPLOAD_KEY`) or body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign batch (`PHOTO_BATCH_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Batch closed/expired or photo limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Missing upload, oversized file or invalid image.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/property-photo-batches/{batchId}/photos/{uploadId}/content:
+    parameters:
+      - $ref: "#/components/parameters/PhotoBatchId"
+      - $ref: "#/components/parameters/PhotoUploadId"
+    get:
+      tags: [Properties]
+      summary: Preview an owned temporary photo
+      responses:
+        "200":
+          description: WebP temporary photo bytes.
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign batch/photo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/property-photo-batches/{batchId}/photos/{uploadId}:
+    parameters:
+      - $ref: "#/components/parameters/PhotoBatchId"
+      - $ref: "#/components/parameters/PhotoUploadId"
+    delete:
+      tags: [Properties]
+      summary: Remove a photo from an open batch
+      responses:
+        "200":
+          description: Temporary photo deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteBatchPhotoResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign batch/photo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Batch closed or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties:
+    post:
+      tags: [Properties]
+      summary: Create a property capture
+      description: |
+        A PARTNER creates the capture for itself. An ADMIN creates for itself
+        when `agentId` is omitted, or may assign any active ADMIN/PARTNER by
+        providing `agentId`. The request must reference an owned photo batch
+        with at least five READY photos; photos and capture are committed
+        atomically. `code` and `currency` are generated by the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePropertyRequest"
+      responses:
+        "201":
+          description: Capture created as ACTIVE.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A PARTNER tried to assign another agent (`PROPERTY_AGENT_ASSIGNMENT_FORBIDDEN`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Selected user is inactive (`PROPERTY_AGENT_INACTIVE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            Selected agent does not exist (`INVALID_PROPERTY_AGENT`), fewer than
+            five READY photos (`MINIMUM_PHOTOS_REQUIRED`) or a cover outside the
+            batch (`INVALID_COVER_PHOTO`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [Properties]
+      summary: List accessible captures
+      description: |
+        PARTNER users only see their own captures. ADMIN users see all captures
+        and may filter by `agentId`. Soft-deleted captures are always excluded.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: search
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: code
+          in: query
+          description: |
+            Exact capture code. Accepts `1`, `0001`, `HK-1` or `HK-0001`; the
+            server normalizes the value to the stored `HK-0001` format.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 22
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/PropertyStatus"
+        - name: propertyType
+          in: query
+          schema:
+            $ref: "#/components/schemas/PropertyType"
+        - name: listingType
+          in: query
+          schema:
+            $ref: "#/components/schemas/ListingType"
+        - name: state
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: city
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: neighborhood
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: priceMin
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: priceMax
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: bedroomsMin
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: bathroomsMin
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: parkingSpacesMin
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: agentId
+          in: query
+          description: ADMIN only.
+          schema:
+            type: integer
+            minimum: 1
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [createdAt, updatedAt, price, title]
+            default: createdAt
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        "200":
+          description: Capture page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: PARTNER tried to filter another agent (`PROPERTY_AGENT_FILTER_FORBIDDEN`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+    get:
+      tags: [Properties]
+      summary: Get an accessible capture
+      responses:
+        "200":
+          description: Capture with its ordered photos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown, deleted or foreign capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags: [Properties]
+      summary: Update a capture
+      description: |
+        PARTNER edits only its own captures and cannot edit CLOSED captures.
+        ADMIN may edit any capture, reassign the agent and reopen a CLOSED
+        capture. Latitude and longitude must be supplied together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePropertyRequest"
+      responses:
+        "200":
+          description: Updated capture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Forbidden agent assignment (`PROPERTY_AGENT_ASSIGNMENT_FORBIDDEN`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown or foreign capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Closed capture (`PROPERTY_CLOSED`) or inactive assignee (`PROPERTY_AGENT_INACTIVE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Selected agent does not exist (`INVALID_PROPERTY_AGENT`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Properties]
+      summary: Soft-delete a capture (ADMIN only)
+      responses:
+        "200":
+          description: Capture hidden without deleting its audit history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletePropertyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Unknown or already deleted capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/upload-url:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+    post:
+      tags: [Properties]
+      summary: Create a pre-signed photo upload target
+      description: |
+        Returns a short-lived PUT URL for R2 or a signed local endpoint during
+        development. The declared MIME type and size are validated, but the
+        actual bytes are verified during confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhotoUploadTargetRequest"
+      responses:
+        "200":
+          description: Upload target created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoUploadTargetResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Closed capture (`PROPERTY_CLOSED`) or photo limit (`PHOTO_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/confirm:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+    post:
+      tags: [Properties]
+      summary: Confirm a pre-signed photo upload
+      description: |
+        Validates the real image format, strips EXIF/GPS metadata, converts the
+        photo to WebP, enforces the 20-photo limit and creates the photo row.
+        The first photo becomes the cover.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmPhotoRequest"
+      responses:
+        "201":
+          description: Photo created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoResponse"
+        "400":
+          description: Invalid key or body (`INVALID_PHOTO_UPLOAD_KEY`, `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Closed capture (`PROPERTY_CLOSED`) or photo limit (`PHOTO_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Missing upload (`PHOTO_UPLOAD_NOT_FOUND`), oversized file (`PHOTO_TOO_LARGE`) or undecodable image (`INVALID_PHOTO_IMAGE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/order:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+    patch:
+      tags: [Properties]
+      summary: Reorder all photos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderPhotosRequest"
+      responses:
+        "200":
+          description: Photos in their new order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoListResponse"
+        "400":
+          description: Incomplete/duplicate order (`PHOTO_ORDER_MISMATCH`, `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown or foreign capture (`PROPERTY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Closed capture (`PROPERTY_CLOSED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/{photoId}/cover:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+      - $ref: "#/components/parameters/PhotoId"
+    patch:
+      tags: [Properties]
+      summary: Select the cover photo
+      responses:
+        "200":
+          description: Selected cover photo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown capture or photo (`PROPERTY_NOT_FOUND`, `PHOTO_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Closed capture (`PROPERTY_CLOSED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/{photoId}:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+      - $ref: "#/components/parameters/PhotoId"
+    delete:
+      tags: [Properties]
+      summary: Delete a photo and its storage object
+      description: |
+        If the cover is deleted, the first remaining photo becomes the cover.
+        A capture can never go below five photos.
+      responses:
+        "200":
+          description: Photo deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletePhotoResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown capture or photo (`PROPERTY_NOT_FOUND`, `PHOTO_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Closed capture (`PROPERTY_CLOSED`) or the operation would leave
+            fewer than five photos (`MINIMUM_PHOTOS_REQUIRED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/properties/{id}/photos/{photoId}/content:
+    parameters:
+      - $ref: "#/components/parameters/PropertyId"
+      - $ref: "#/components/parameters/PhotoId"
+    get:
+      tags: [Properties]
+      summary: Download an accessible photo
+      description: Authenticated content endpoint with capture ownership checks.
+      responses:
+        "200":
+          description: WebP photo bytes.
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Unknown capture or photo (`PROPERTY_NOT_FOUND`, `PHOTO_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/property-photos/local-upload:
+    parameters:
+      - name: X-Photo-Upload-Token
+        in: header
+        required: true
+        description: HMAC-signed, short-lived local upload token.
+        schema:
+          type: string
+          maxLength: 4096
+    put:
+      tags: [Properties]
+      summary: Receive a local-development photo upload
+      description: |
+        Local-development replacement for an R2 pre-signed PUT. The signed
+        token grants temporary upload permission; this endpoint is not used
+        when `STORAGE_DRIVER=r2`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/webp:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Upload stored.
+        "400":
+          description: Content type or size mismatch (`PHOTO_UPLOAD_TYPE_MISMATCH`, `PHOTO_UPLOAD_SIZE_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid or expired signed token (`PHOTO_UPLOAD_TOKEN_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Local uploads are disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -551,6 +1257,40 @@ components:
         type: integer
         minimum: 1
         maximum: 2147483647
+    PropertyId:
+      name: id
+      in: path
+      required: true
+      description: Numeric property capture ID.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+    PhotoId:
+      name: photoId
+      in: path
+      required: true
+      description: Numeric photo ID scoped to the capture.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+    PhotoBatchId:
+      name: batchId
+      in: path
+      required: true
+      description: Temporary photo batch UUID.
+      schema:
+        type: string
+        format: uuid
+    PhotoUploadId:
+      name: uploadId
+      in: path
+      required: true
+      description: Temporary photo upload UUID.
+      schema:
+        type: string
+        format: uuid
     Page:
       name: page
       in: query
@@ -941,6 +1681,769 @@ components:
         createdAt:
           type: string
           format: date-time
+    PropertyType:
+      type: string
+      enum:
+        - HOUSE
+        - APARTMENT
+        - TOWNHOUSE
+        - LAND
+        - COMMERCIAL
+        - OFFICE
+        - WAREHOUSE
+        - FARM
+    ListingType:
+      type: string
+      enum: [SALE, RENT]
+    PropertyStatus:
+      type: string
+      enum: [ACTIVE, PAUSED, CLOSED]
+    Currency:
+      type: string
+      enum: [USD]
+    PropertyPhotoBatchStatus:
+      type: string
+      enum: [OPEN, CONSUMED, EXPIRED]
+    PropertyPhotoUploadStatus:
+      type: string
+      enum: [READY, CONSUMED]
+    PropertyPhotoUpload:
+      type: object
+      required:
+        - id
+        - previewUrl
+        - mimeType
+        - sizeBytes
+        - width
+        - height
+        - altText
+        - sortOrder
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        previewUrl:
+          type: string
+          format: uri-reference
+        mimeType:
+          type: string
+          enum: [image/webp]
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 8388608
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        altText:
+          type: [string, "null"]
+          maxLength: 300
+        sortOrder:
+          type: integer
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/PropertyPhotoUploadStatus"
+        createdAt:
+          type: string
+          format: date-time
+    PropertyPhotoBatch:
+      type: object
+      required:
+        - id
+        - status
+        - expiresAt
+        - createdAt
+        - updatedAt
+        - uploads
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/PropertyPhotoBatchStatus"
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        uploads:
+          type: array
+          items:
+            $ref: "#/components/schemas/PropertyPhotoUpload"
+    PhotoBatchResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [batch]
+              properties:
+                batch:
+                  $ref: "#/components/schemas/PropertyPhotoBatch"
+    PhotoUploadResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [upload]
+              properties:
+                upload:
+                  $ref: "#/components/schemas/PropertyPhotoUpload"
+    ConfirmBatchPhotoRequest:
+      type: object
+      additionalProperties: false
+      required: [storageKey]
+      properties:
+        storageKey:
+          type: string
+          maxLength: 500
+          pattern: '^property-photo-batches/[0-9a-f-]{36}/uploads/[a-f0-9-]+\.(jpg|jpeg|png|webp)$'
+        altText:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 300
+    DeleteBatchPhotoResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [deletedId]
+              properties:
+                deletedId:
+                  type: string
+                  format: uuid
+    PropertyPhoto:
+      type: object
+      required:
+        - id
+        - url
+        - mimeType
+        - sizeBytes
+        - width
+        - height
+        - altText
+        - sortOrder
+        - isCover
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        url:
+          type: string
+          format: uri-reference
+        mimeType:
+          type: string
+          enum: [image/webp]
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 8388608
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        altText:
+          type: [string, "null"]
+          maxLength: 300
+        sortOrder:
+          type: integer
+          minimum: 0
+        isCover:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Property:
+      type: object
+      required:
+        - id
+        - agentId
+        - code
+        - title
+        - propertyType
+        - listingType
+        - status
+        - description
+        - ownerName
+        - ownerPhone
+        - ownerEmail
+        - address
+        - neighborhood
+        - city
+        - state
+        - latitude
+        - longitude
+        - price
+        - currency
+        - maintenanceFee
+        - isNegotiable
+        - bedrooms
+        - bathrooms
+        - parkingSpaces
+        - squareMeters
+        - lotSquareMeters
+        - yearBuilt
+        - apartmentFloor
+        - hasWaterTank
+        - hasPowerPlant
+        - isFurnished
+        - allowsPets
+        - hasPool
+        - hasGym
+        - hasBalcony
+        - hasAirConditioning
+        - hasSecurity
+        - hasElevator
+        - videoUrl
+        - virtualTourUrl
+        - closedAt
+        - createdAt
+        - updatedAt
+        - photos
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        agentId:
+          type: integer
+          minimum: 1
+        code:
+          type: string
+          pattern: '^HK-[0-9]{4,}$'
+          example: HK-0001
+          description: Stable internal capture code. The year is not embedded; display the creation date from `createdAt`.
+        title:
+          type: string
+          maxLength: 200
+        propertyType:
+          $ref: "#/components/schemas/PropertyType"
+        listingType:
+          $ref: "#/components/schemas/ListingType"
+        status:
+          $ref: "#/components/schemas/PropertyStatus"
+        description:
+          type: [string, "null"]
+        ownerName:
+          type: string
+          maxLength: 150
+        ownerPhone:
+          type: string
+          maxLength: 20
+        ownerEmail:
+          type: [string, "null"]
+          format: email
+        address:
+          type: string
+        neighborhood:
+          type: [string, "null"]
+          maxLength: 100
+        city:
+          type: string
+          maxLength: 100
+        state:
+          type: string
+          maxLength: 100
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        price:
+          type: string
+          pattern: '^[0-9]+\.[0-9]{2}$'
+        currency:
+          $ref: "#/components/schemas/Currency"
+        maintenanceFee:
+          type: [string, "null"]
+          pattern: '^[0-9]+\.[0-9]{2}$'
+        isNegotiable:
+          type: boolean
+        bedrooms:
+          type: integer
+          minimum: 0
+        bathrooms:
+          type: integer
+          minimum: 0
+        parkingSpaces:
+          type: integer
+          minimum: 0
+        squareMeters:
+          type: string
+          pattern: '^[0-9]+\.[0-9]{2}$'
+        lotSquareMeters:
+          type: [string, "null"]
+          pattern: '^[0-9]+\.[0-9]{2}$'
+        yearBuilt:
+          type: [integer, "null"]
+        apartmentFloor:
+          type: [integer, "null"]
+        hasWaterTank:
+          type: boolean
+        hasPowerPlant:
+          type: boolean
+        isFurnished:
+          type: boolean
+        allowsPets:
+          type: boolean
+        hasPool:
+          type: boolean
+        hasGym:
+          type: boolean
+        hasBalcony:
+          type: boolean
+        hasAirConditioning:
+          type: boolean
+        hasSecurity:
+          type: boolean
+        hasElevator:
+          type: boolean
+        videoUrl:
+          type: [string, "null"]
+          format: uri
+        virtualTourUrl:
+          type: [string, "null"]
+          format: uri
+        closedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        photos:
+          type: array
+          items:
+            $ref: "#/components/schemas/PropertyPhoto"
+    CreatePropertyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - photoBatchId
+        - title
+        - propertyType
+        - listingType
+        - ownerName
+        - ownerPhone
+        - address
+        - city
+        - state
+        - latitude
+        - longitude
+        - price
+        - bedrooms
+        - bathrooms
+        - parkingSpaces
+        - squareMeters
+      properties:
+        agentId:
+          type: integer
+          minimum: 1
+          description: Optional for ADMIN (defaults to the acting administrator); forbidden for PARTNER.
+        photoBatchId:
+          type: string
+          format: uuid
+          description: Owned OPEN batch with 5 to 20 READY photos.
+        coverUploadId:
+          type: string
+          format: uuid
+          description: Optional READY upload from the same batch; defaults to the first photo.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        propertyType:
+          $ref: "#/components/schemas/PropertyType"
+        listingType:
+          $ref: "#/components/schemas/ListingType"
+        description:
+          type: [string, "null"]
+          maxLength: 2000
+        ownerName:
+          type: string
+          minLength: 1
+          maxLength: 150
+        ownerPhone:
+          type: string
+          minLength: 6
+          maxLength: 20
+        ownerEmail:
+          type: [string, "null"]
+          format: email
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        neighborhood:
+          type: [string, "null"]
+          maxLength: 100
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        state:
+          type: string
+          minLength: 1
+          maxLength: 100
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        price:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+        maintenanceFee:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 9999999999.99
+        isNegotiable:
+          type: boolean
+        bedrooms:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        bathrooms:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        parkingSpaces:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        squareMeters:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 99999999.99
+        lotSquareMeters:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        yearBuilt:
+          type: [integer, "null"]
+          minimum: 1800
+        apartmentFloor:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 500
+        hasWaterTank:
+          type: boolean
+        hasPowerPlant:
+          type: boolean
+        isFurnished:
+          type: boolean
+        allowsPets:
+          type: boolean
+        hasPool:
+          type: boolean
+        hasGym:
+          type: boolean
+        hasBalcony:
+          type: boolean
+        hasAirConditioning:
+          type: boolean
+        hasSecurity:
+          type: boolean
+        hasElevator:
+          type: boolean
+        videoUrl:
+          type: [string, "null"]
+          format: uri
+        virtualTourUrl:
+          type: [string, "null"]
+          format: uri
+    UpdatePropertyRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: |
+        All create fields are optional. `status` and `agentId` are accepted.
+        Latitude and longitude must be supplied together. CLOSED captures are
+        read-only for PARTNER users.
+      properties:
+        agentId:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        propertyType:
+          $ref: "#/components/schemas/PropertyType"
+        listingType:
+          $ref: "#/components/schemas/ListingType"
+        status:
+          $ref: "#/components/schemas/PropertyStatus"
+        description:
+          type: [string, "null"]
+          maxLength: 2000
+        ownerName:
+          type: string
+          minLength: 1
+          maxLength: 150
+        ownerPhone:
+          type: string
+          minLength: 6
+          maxLength: 20
+        ownerEmail:
+          type: [string, "null"]
+          format: email
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        neighborhood:
+          type: [string, "null"]
+          maxLength: 100
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        state:
+          type: string
+          minLength: 1
+          maxLength: 100
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        price:
+          type: number
+          minimum: 0
+          maximum: 9999999999.99
+        maintenanceFee:
+          type: [number, "null"]
+          minimum: 0
+        isNegotiable:
+          type: boolean
+        bedrooms:
+          type: integer
+          minimum: 0
+        bathrooms:
+          type: integer
+          minimum: 0
+        parkingSpaces:
+          type: integer
+          minimum: 0
+        squareMeters:
+          type: number
+          exclusiveMinimum: 0
+        lotSquareMeters:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        yearBuilt:
+          type: [integer, "null"]
+          minimum: 1800
+        apartmentFloor:
+          type: [integer, "null"]
+          minimum: 0
+        hasWaterTank:
+          type: boolean
+        hasPowerPlant:
+          type: boolean
+        isFurnished:
+          type: boolean
+        allowsPets:
+          type: boolean
+        hasPool:
+          type: boolean
+        hasGym:
+          type: boolean
+        hasBalcony:
+          type: boolean
+        hasAirConditioning:
+          type: boolean
+        hasSecurity:
+          type: boolean
+        hasElevator:
+          type: boolean
+        videoUrl:
+          type: [string, "null"]
+          format: uri
+        virtualTourUrl:
+          type: [string, "null"]
+          format: uri
+    PhotoUploadTargetRequest:
+      type: object
+      additionalProperties: false
+      required: [mimeType, sizeBytes]
+      properties:
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 8388608
+    PhotoUploadTarget:
+      type: object
+      required: [url, method, headers, expiresAt, storageKey]
+      properties:
+        url:
+          type: string
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+        storageKey:
+          type: string
+    PhotoUploadTargetResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [upload]
+              properties:
+                upload:
+                  $ref: "#/components/schemas/PhotoUploadTarget"
+    ConfirmPhotoRequest:
+      type: object
+      additionalProperties: false
+      required: [storageKey]
+      properties:
+        storageKey:
+          type: string
+          maxLength: 500
+          pattern: '^properties/[0-9]+/uploads/[a-f0-9-]+\.(jpg|jpeg|png|webp)$'
+        altText:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 300
+    ReorderPhotosRequest:
+      type: object
+      additionalProperties: false
+      required: [photoIds]
+      properties:
+        photoIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+    PropertyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [property]
+              properties:
+                property:
+                  $ref: "#/components/schemas/Property"
+    PropertyListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [properties, pagination]
+              properties:
+                properties:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Property"
+                pagination:
+                  $ref: "#/components/schemas/Pagination"
+    PhotoResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  $ref: "#/components/schemas/PropertyPhoto"
+    PhotoListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [photos]
+              properties:
+                photos:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PropertyPhoto"
+    DeletePropertyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [deletedId]
+              properties:
+                deletedId:
+                  type: integer
+    DeletePhotoResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessBase"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: object
+              required: [deletedId]
+              properties:
+                deletedId:
+                  type: integer
     SuccessBase:
       type: object
       required: [success, message]

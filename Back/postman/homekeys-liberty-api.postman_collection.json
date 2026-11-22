@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "HomeKeys Liberty - API",
-    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, and targetUserId with local values before running. Role-dependent assertions adapt to the authenticated user. Suggested order: Login, Create user (captures targetUserId), Update user, Update my profile, Deactivate user, Reactivate user, Send password reset link, Resend invitation, Change my password, Delete user, Logout. The ADMIN never sets passwords: Create user queues a single-use invitation and the user defines their own password through the link. Send password reset link and Resend invitation queue emails through the durable outbox; emailSent means the email was queued. Update user does not accept a password. Forgot password always answers generically; copy the token from the received email link into the resetToken variable before running Reset password, which on success copies newUserPassword into loginPassword. These requests can create, modify, and delete users in the target database; run them only against a local development database.\n\nRequests are grouped into folders: Auth, Users, Audit, Health and Captaciones. Captaciones is reserved for the next module.",
+    "description": "Canonical API collection with a single login flow. Set loginEmail, loginPassword, newUserPassword, targetUserId and propertyAgentId with local values before running. Role-dependent assertions adapt to the authenticated user. The ADMIN never sets passwords: Create user queues a single-use invitation and the user defines their own password through the link. Emails are queued through the durable outbox, so emailSent means the email was queued. Captaciones covers property CRUD, ownership, status, reassignment and the pre-signed photo flow. Run these requests only against a local development database.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -54,6 +54,46 @@
     {
       "key": "rootUrl",
       "value": "http://localhost:3000"
+    },
+    {
+      "key": "propertyId",
+      "value": ""
+    },
+    {
+      "key": "propertyAgentId",
+      "value": ""
+    },
+    {
+      "key": "propertyPhotoId",
+      "value": ""
+    },
+    {
+      "key": "photoUploadUrl",
+      "value": ""
+    },
+    {
+      "key": "photoUploadKey",
+      "value": ""
+    },
+    {
+      "key": "photoUploadToken",
+      "value": ""
+    },
+    {
+      "key": "propertyCode",
+      "value": ""
+    },
+    {
+      "key": "photoBatchId",
+      "value": ""
+    },
+    {
+      "key": "photoBatchUploadId",
+      "value": ""
+    },
+    {
+      "key": "coverUploadId",
+      "value": ""
     }
   ],
   "item": [
@@ -886,8 +926,727 @@
     },
     {
       "name": "Captaciones",
-      "description": "Reserved for the property/captaciones API. It will be completed after the Users module is finished.",
-      "item": []
+      "description": "Property captures. Login first. Create property stores propertyId. ADMIN creates must set propertyAgentId; PARTNER creates must omit it. Photo confirmation requires uploading the raw file to photoUploadUrl before running Confirm photo.",
+      "item": [
+        {
+          "name": "Create photo batch",
+          "description": "Start a temporary batch. Upload and confirm at least five photos before creating the capture.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Photo batch created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(responseBody.data.batch.status).to.eql('OPEN');",
+                  "    pm.expect(responseBody.data.batch.uploads).to.eql([]);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('photoBatchId', responseBody.data.batch.id);",
+                  "    pm.collectionVariables.set('photoBatchUploadId', '');",
+                  "    pm.collectionVariables.set('coverUploadId', '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/property-photo-batches"
+          },
+          "response": []
+        },
+        {
+          "name": "Create batch photo upload URL",
+          "description": "Replace sizeBytes with the real file size, upload the binary, then run Confirm batch photo.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Batch photo upload target created', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.upload.method).to.eql('PUT');",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('photoUploadUrl', responseBody.data.upload.url);",
+                  "    pm.collectionVariables.set('photoUploadKey', responseBody.data.upload.storageKey);",
+                  "    const uploadHeaders = responseBody.data.upload.headers || {};",
+                  "    pm.collectionVariables.set('photoUploadToken', uploadHeaders['X-Photo-Upload-Token'] || '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mimeType\": \"image/jpeg\",\n  \"sizeBytes\": 245760\n}"
+            },
+            "url": "{{baseUrl}}/property-photo-batches/{{photoBatchId}}/photos/upload-url"
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm batch photo",
+          "description": "Run the upload URL, binary PUT and this confirmation once per photo. Repeat until the batch has at least five READY photos.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Batch photo confirmed', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(responseBody.data.upload.status).to.eql('READY');",
+                  "    pm.expect(responseBody.data.upload.mimeType).to.eql('image/webp');",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('photoBatchUploadId', responseBody.data.upload.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"{{photoUploadKey}}\",\n  \"altText\": \"Foto de captación\"\n}"
+            },
+            "url": "{{baseUrl}}/property-photo-batches/{{photoBatchId}}/photos/confirm"
+          },
+          "response": []
+        },
+        {
+          "name": "Get photo batch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Photo batch has at least five ready photos', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.batch.uploads.length).to.be.at.least(5);",
+                  "    pm.expect(responseBody.data.batch.uploads.every(function (upload) {",
+                  "        return upload.status === 'READY';",
+                  "    })).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/property-photo-batches/{{photoBatchId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Preview batch photo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Batch photo content returned', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('image/webp');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/property-photo-batches/{{photoBatchId}}/photos/{{photoBatchUploadId}}/content"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete batch photo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Batch photo deleted', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/property-photo-batches/{{photoBatchId}}/photos/{{photoBatchUploadId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Create property",
+          "description": "Requires photoBatchId with at least five READY photos. Leave coverUploadId empty to use the first photo, or set it to a batch photo ID. PARTNER creates for itself; ADMIN creates for itself or sets propertyAgentId for another active user.",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = JSON.parse(pm.request.body.raw);",
+                  "const requestedAgent = String(pm.collectionVariables.get('propertyAgentId') || '').trim();",
+                  "if (pm.collectionVariables.get('currentUserRole') === 'ADMIN' && requestedAgent !== '') {",
+                  "    body.agentId = Number(requestedAgent);",
+                  "    if (!Number.isInteger(body.agentId) || body.agentId < 1) {",
+                  "        throw new Error('propertyAgentId must be an active user ID or empty for self-assignment');",
+                  "    }",
+                  "} else {",
+                  "    delete body.agentId;",
+                  "}",
+                  "const coverUploadId = String(pm.collectionVariables.get('coverUploadId') || '').trim();",
+                  "if (coverUploadId !== '') {",
+                  "    body.coverUploadId = coverUploadId;",
+                  "} else {",
+                  "    delete body.coverUploadId;",
+                  "}",
+                  "pm.request.body.update(JSON.stringify(body));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Property capture created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(responseBody.data.property.status).to.eql('ACTIVE');",
+                  "    pm.expect(responseBody.data.property.currency).to.eql('USD');",
+                  "    pm.expect(responseBody.data.property.photos.length).to.be.at.least(5);",
+                  "    pm.expect(responseBody.data.property.photos.filter(function (photo) {",
+                  "        return photo.isCover;",
+                  "    }).length).to.eql(1);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('propertyId', String(responseBody.data.property.id));",
+                  "    pm.collectionVariables.set('propertyAgentId', String(responseBody.data.property.agentId));",
+                  "    pm.collectionVariables.set('propertyCode', responseBody.data.property.code);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Casa de ejemplo\",\n  \"propertyType\": \"HOUSE\",\n  \"listingType\": \"SALE\",\n  \"description\": \"Captación de prueba local.\",\n  \"ownerName\": \"Propietario Ejemplo\",\n  \"ownerPhone\": \"0414-1234567\",\n  \"ownerEmail\": \"owner@example.com\",\n  \"address\": \"Av. Principal, casa 1\",\n  \"neighborhood\": \"Centro\",\n  \"city\": \"Valencia\",\n  \"state\": \"Carabobo\",\n  \"latitude\": 10.1234567,\n  \"longitude\": -68.1234567,\n  \"price\": 150000,\n  \"maintenanceFee\": 80,\n  \"isNegotiable\": true,\n  \"bedrooms\": 3,\n  \"bathrooms\": 2,\n  \"parkingSpaces\": 2,\n  \"squareMeters\": 120,\n  \"lotSquareMeters\": 200,\n  \"yearBuilt\": 2010,\n  \"hasWaterTank\": true,\n  \"hasPowerPlant\": true,\n  \"hasBalcony\": true,\n  \"hasAirConditioning\": true,\n  \"hasSecurity\": true,\n  \"agentId\": \"{{propertyAgentId}}\",\n  \"photoBatchId\": \"{{photoBatchId}}\",\n  \"coverUploadId\": \"{{coverUploadId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/properties"
+          },
+          "response": []
+        },
+        {
+          "name": "List properties",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Property list returned', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.properties).to.be.an('array');",
+                  "    pm.expect(responseBody.data.pagination).to.include.keys('page', 'pageSize', 'total', 'totalPages');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/properties?page=1&pageSize=20&sortBy=createdAt&sortOrder=desc"
+          },
+          "response": []
+        },
+        {
+          "name": "Find property by code",
+          "description": "The filter also accepts the numeric part only, for example 1 or 0001.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Property found by code', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.properties.some(function (property) {",
+                  "        return property.code === pm.collectionVariables.get('propertyCode');",
+                  "    })).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/properties?code={{propertyCode}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get property",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Property returned', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.property.id).to.eql(Number(pm.collectionVariables.get('propertyId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Update property",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Property updated', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.property.price).to.eql('160000.00');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Casa actualizada\",\n  \"price\": 160000,\n  \"maintenanceFee\": null,\n  \"latitude\": 10.2345678,\n  \"longitude\": -68.2345678\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Pause property",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Property paused', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.property.status).to.eql('PAUSED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAUSED\"\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Close property",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Property closed', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.property.status).to.eql('CLOSED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Reopen property (ADMIN)",
+          "description": "Only ADMIN can reopen a CLOSED capture.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Property reopened', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.property.status).to.eql('ACTIVE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\"\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Reassign property (ADMIN)",
+          "description": "Set targetUserId to any active ADMIN or PARTNER.",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = JSON.parse(pm.request.body.raw);",
+                  "body.agentId = Number(pm.collectionVariables.get('targetUserId'));",
+                  "if (!Number.isInteger(body.agentId) || body.agentId < 1) {",
+                  "    throw new Error('Set targetUserId to an active user ID');",
+                  "}",
+                  "pm.request.body.update(JSON.stringify(body));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Property reassigned', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.property.agentId).to.eql(Number(pm.collectionVariables.get('targetUserId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agentId\": \"{{targetUserId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Create photo upload URL",
+          "description": "Replace sizeBytes with the real local file size. Then PUT the file to photoUploadUrl with the returned headers.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Photo upload target created', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(responseBody.data.upload.method).to.eql('PUT');",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('photoUploadUrl', responseBody.data.upload.url);",
+                  "    pm.collectionVariables.set('photoUploadKey', responseBody.data.upload.storageKey);",
+                  "    const uploadHeaders = responseBody.data.upload.headers || {};",
+                  "    pm.collectionVariables.set('photoUploadToken', uploadHeaders['X-Photo-Upload-Token'] || '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mimeType\": \"image/jpeg\",\n  \"sizeBytes\": 245760\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/upload-url"
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm photo",
+          "description": "Upload the file first. The first confirmed photo becomes the cover; images are converted to WebP and EXIF is removed.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseBody = pm.response.json();",
+                  "pm.test('Photo confirmed', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(responseBody.data.photo.mimeType).to.eql('image/webp');",
+                  "    pm.expect(responseBody.data.photo.isCover).to.eql(true);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('propertyPhotoId', String(responseBody.data.photo.id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"{{photoUploadKey}}\",\n  \"altText\": \"Fachada principal\"\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/confirm"
+          },
+          "response": []
+        },
+        {
+          "name": "Get photo content",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Photo content returned', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('image/webp');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/{{propertyPhotoId}}/content"
+          },
+          "response": []
+        },
+        {
+          "name": "Select cover photo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cover selected', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.photo.isCover).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/{{propertyPhotoId}}/cover"
+          },
+          "response": []
+        },
+        {
+          "name": "Reorder photos",
+          "description": "With several photos, send every photo ID exactly once in the desired order.",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = JSON.parse(pm.request.body.raw);",
+                  "body.photoIds = body.photoIds.map(Number).filter(Number.isInteger);",
+                  "pm.request.body.update(JSON.stringify(body));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Photos reordered', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.photos).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"photoIds\": [\n    \"{{propertyPhotoId}}\"\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/order"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete photo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Photo deleted', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.deletedId).to.eql(Number(pm.collectionVariables.get('propertyPhotoId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/properties/{{propertyId}}/photos/{{propertyPhotoId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete property (ADMIN)",
+          "description": "Soft delete. Only ADMIN can execute it.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Property soft-deleted', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.deletedId).to.eql(Number(pm.collectionVariables.get('propertyId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/properties/{{propertyId}}"
+          },
+          "response": []
+        }
+      ]
     }
   ]
 }

@@ -30,6 +30,19 @@ const CODE_MIGRATION_PATH = path.join(
 
 const codeMigrationSql = readFileSync(CODE_MIGRATION_PATH, "utf8");
 
+const SHORT_CODE_MIGRATION_PATH = path.join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20261122120000_use_short_property_codes",
+  "migration.sql",
+);
+
+const shortCodeMigrationSql = readFileSync(
+  SHORT_CODE_MIGRATION_PATH,
+  "utf8",
+);
+
 const getModel = (name: string) => {
   const model = Prisma.dmmf.datamodel.models.find(
     (candidate) => candidate.name === name,
@@ -125,6 +138,30 @@ describe("Property capture schema", () => {
     );
   });
 
+  it("defines pre-creation photo batches", () => {
+    assertRequiredFields("PropertyPhotoBatch", [
+      "id",
+      "userId",
+      "status",
+      "expiresAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    assertRequiredFields("PropertyPhotoUpload", [
+      "id",
+      "batchId",
+      "storageKey",
+      "mimeType",
+      "sizeBytes",
+      "width",
+      "height",
+      "sortOrder",
+      "status",
+      "createdAt",
+      "updatedAt",
+    ]);
+  });
+
   it("stores photo metadata instead of arbitrary image URLs", () => {
     assertRequiredFields("Photo", [
       "propertyId",
@@ -157,6 +194,18 @@ describe("Property capture schema", () => {
     assert.match(
       codeMigrationSql,
       /ALTER COLUMN "code"[\s\S]*SET DEFAULT/,
+    );
+    assert.match(
+      shortCodeMigrationSql,
+      /lpad\(nextval\('property_code_seq'\)::text, 4, '0'\)/,
+    );
+    assert.match(
+      shortCodeMigrationSql,
+      /CHECK \("code" ~ '\^HK-\[0-9\]\{4,\}\$'\)/,
+    );
+    assert.match(
+      shortCodeMigrationSql,
+      /regexp_replace\("code", '\^HK-\[0-9\]\{4\}-', ''\)/,
     );
   });
 

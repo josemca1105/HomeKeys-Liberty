@@ -54,7 +54,13 @@ describe("Postman collection contract", () => {
     assert.equal(collection.info?.name, "HomeKeys Liberty - API");
     assert.equal(collection.auth?.type, "bearer");
 
-    for (const folder of ["Auth", "Users", "Audit", "Health"]) {
+    for (const folder of [
+      "Auth",
+      "Users",
+      "Audit",
+      "Health",
+      "Captaciones",
+    ]) {
       assert.ok(findFolder(folder), `Missing folder: ${folder}`);
     }
 
@@ -90,6 +96,36 @@ describe("Postman collection contract", () => {
 
     assert.ok(findRequest("Health", "Health"));
     assert.ok(findRequest("Health", "Ready"));
+
+    for (const requestName of [
+      "Create photo batch",
+      "Create batch photo upload URL",
+      "Confirm batch photo",
+      "Get photo batch",
+      "Preview batch photo",
+      "Delete batch photo",
+      "Create property",
+      "List properties",
+      "Find property by code",
+      "Get property",
+      "Update property",
+      "Pause property",
+      "Close property",
+      "Reopen property (ADMIN)",
+      "Reassign property (ADMIN)",
+      "Create photo upload URL",
+      "Confirm photo",
+      "Get photo content",
+      "Select cover photo",
+      "Reorder photos",
+      "Delete photo",
+      "Delete property (ADMIN)",
+    ]) {
+      assert.ok(
+        findRequest("Captaciones", requestName),
+        `Missing Captaciones request: ${requestName}`,
+      );
+    }
   });
 
   it("never sends a password through create or update user", () => {
@@ -133,6 +169,16 @@ describe("Postman collection contract", () => {
       "currentUserId",
       "currentUserRole",
       "targetUserId",
+      "propertyId",
+      "propertyCode",
+      "propertyAgentId",
+      "propertyPhotoId",
+      "photoBatchId",
+      "photoBatchUploadId",
+      "coverUploadId",
+      "photoUploadUrl",
+      "photoUploadKey",
+      "photoUploadToken",
     ]) {
       assert.equal(keys.has(key), true, `Missing collection variable: ${key}`);
     }

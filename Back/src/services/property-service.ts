@@ -2,34 +2,39 @@ import { AuditScope, Prisma, PropertyStatus, Role } from "@prisma/client";
 import { prisma } from "../config/database";
 import { findUserById } from "../repositories/user-repository";
 import {
+  countProperties,
   createPropertyRecord,
+  findPropertiesPage,
   findPropertyById,
   updatePropertyRecord,
 } from "../repositories/property-repository";
+import {
+  findPhotosByPropertyId,
+  findPhotosByPropertyIds,
+} from "../repositories/photo-repository";
 import { runSerializableTransaction } from "../repositories/serializable-transaction";
 import type { AuditContext } from "../types/audit";
 import type { AuthSession } from "../types/auth";
 import type {
   CreatePropertyInput,
+  ListPropertiesQuery,
+  PaginatedPropertiesResult,
   PropertyResponse,
   UpdatePropertyInput,
 } from "../types/property";
 import { AppError } from "../utils/app-error";
 import { toPropertyResponse } from "../utils/property-response";
 import { recordAuditEventInTransaction } from "./audit-service";
+import {
+  assertPhotoBatchReadyForCreation,
+  attachPhotoBatchToProperty,
+} from "./property-photo-batch-service";
 
 const propertyNotFoundError = (): AppError =>
   new AppError({
     statusCode: 404,
     code: "PROPERTY_NOT_FOUND",
     message: "La captación que buscas no existe.",
-  });
-
-const agentRequiredError = (): AppError =>
-  new AppError({
-    statusCode: 400,
-    code: "PROPERTY_AGENT_REQUIRED",
-    message: "Debes seleccionar un PARTNER responsable para la captación.",
   });
 
 const agentAssignmentForbiddenError = (): AppError =>
@@ -43,14 +48,14 @@ const invalidAgentError = (): AppError =>
   new AppError({
     statusCode: 422,
     code: "INVALID_PROPERTY_AGENT",
-    message: "El responsable debe ser un usuario PARTNER.",
+    message: "El responsable debe ser un usuario existente.",
   });
 
 const inactiveAgentError = (): AppError =>
   new AppError({
     statusCode: 409,
     code: "PROPERTY_AGENT_INACTIVE",
-    message: "El PARTNER seleccionado está desactivado.",
+    message: "El usuario responsable está desactivado.",
   });
 
 const closedPropertyError = (): AppError =>
@@ -73,7 +78,7 @@ const assertAgentAvailableForAssignment = async (
 ): Promise<void> => {
   const agent = await findUserById(agentId, transaction);
 
-  if (!agent || agent.role !== Role.PARTNER) {
+  if (!agent) {
     throw invalidAgentError();
   }
 
@@ -95,8 +100,8 @@ const resolveCreateAgentId = async (
     return session.userId;
   }
 
-  if (requestedAgentId === undefined) {
-    throw agentRequiredError();
+  if (requestedAgentId === undefined || requestedAgentId === session.userId) {
+    return session.userId;
   }
 
   await assertAgentAvailableForAssignment(requestedAgentId, transaction);
@@ -112,6 +117,140 @@ const assertPropertyAccess = (
     // the API never confirms that a capture exists.
     throw propertyNotFoundError();
   }
+};
+
+const agentFilterForbiddenError = (): AppError =>
+  new AppError({
+    statusCode: 403,
+    code: "PROPERTY_AGENT_FILTER_FORBIDDEN",
+    message: "Solamente un administrador puede filtrar por otro agente.",
+  });
+
+const buildPropertyWhere = (
+  query: ListPropertiesQuery,
+  session: AuthSession,
+): Prisma.PropertyWhereInput => {
+  let agentId = query.agentId;
+
+  if (session.role !== Role.ADMIN) {
+    if (agentId !== undefined && agentId !== session.userId) {
+      throw agentFilterForbiddenError();
+    }
+
+    agentId = session.userId;
+  }
+
+  const where: Prisma.PropertyWhereInput = {
+    deletedAt: null,
+    ...(agentId !== undefined ? { agentId } : {}),
+    ...(query.code !== undefined ? { code: query.code } : {}),
+    ...(query.status !== undefined ? { status: query.status } : {}),
+    ...(query.propertyType !== undefined
+      ? { propertyType: query.propertyType }
+      : {}),
+    ...(query.listingType !== undefined
+      ? { listingType: query.listingType }
+      : {}),
+    ...(query.state !== undefined
+      ? { state: { equals: query.state, mode: "insensitive" } }
+      : {}),
+    ...(query.city !== undefined
+      ? { city: { equals: query.city, mode: "insensitive" } }
+      : {}),
+    ...(query.neighborhood !== undefined
+      ? {
+          neighborhood: {
+            contains: query.neighborhood,
+            mode: "insensitive",
+          },
+        }
+      : {}),
+    ...(query.bedroomsMin !== undefined
+      ? { bedrooms: { gte: query.bedroomsMin } }
+      : {}),
+    ...(query.bathroomsMin !== undefined
+      ? { bathrooms: { gte: query.bathroomsMin } }
+      : {}),
+    ...(query.parkingSpacesMin !== undefined
+      ? { parkingSpaces: { gte: query.parkingSpacesMin } }
+      : {}),
+    ...(query.priceMin !== undefined || query.priceMax !== undefined
+      ? {
+          price: {
+            ...(query.priceMin !== undefined
+              ? { gte: toMoney(query.priceMin) }
+              : {}),
+            ...(query.priceMax !== undefined
+              ? { lte: toMoney(query.priceMax) }
+              : {}),
+          },
+        }
+      : {}),
+  };
+
+  if (query.search !== undefined) {
+    where.OR = [
+      { title: { contains: query.search, mode: "insensitive" } },
+      { code: { contains: query.search, mode: "insensitive" } },
+      { address: { contains: query.search, mode: "insensitive" } },
+      { neighborhood: { contains: query.search, mode: "insensitive" } },
+      { ownerName: { contains: query.search, mode: "insensitive" } },
+      { ownerPhone: { contains: query.search } },
+    ];
+  }
+
+  return where;
+};
+
+const buildPropertyOrderBy = (
+  query: ListPropertiesQuery,
+): Prisma.PropertyOrderByWithRelationInput[] => {
+  const primary = {
+    [query.sortBy]: query.sortOrder,
+  } as Prisma.PropertyOrderByWithRelationInput;
+  const tieBreaker: Prisma.PropertyOrderByWithRelationInput =
+    query.sortBy === "title" ? { id: "asc" } : { id: query.sortOrder };
+
+  return [primary, tieBreaker];
+};
+
+export const listProperties = async (
+  query: ListPropertiesQuery,
+  session: AuthSession,
+): Promise<PaginatedPropertiesResult> => {
+  const where = buildPropertyWhere(query, session);
+  const skip = (query.page - 1) * query.pageSize;
+  const [properties, total] = await Promise.all([
+    findPropertiesPage({
+      where,
+      orderBy: buildPropertyOrderBy(query),
+      skip,
+      take: query.pageSize,
+    }),
+    countProperties(where),
+  ]);
+  const photos = await findPhotosByPropertyIds(
+    properties.map((property) => property.id),
+  );
+  const photosByProperty = new Map<number, typeof photos>();
+
+  for (const photo of photos) {
+    const propertyPhotos = photosByProperty.get(photo.propertyId) ?? [];
+    propertyPhotos.push(photo);
+    photosByProperty.set(photo.propertyId, propertyPhotos);
+  }
+
+  return {
+    properties: properties.map((property) =>
+      toPropertyResponse(property, photosByProperty.get(property.id) ?? []),
+    ),
+    pagination: {
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / query.pageSize),
+    },
+  };
 };
 
 const buildCreateData = (
@@ -174,8 +313,21 @@ export const createProperty = async (
       session,
       transaction,
     );
+    await assertPhotoBatchReadyForCreation(
+      input.photoBatchId,
+      session,
+      input.coverUploadId,
+      transaction,
+    );
     const created = await createPropertyRecord(
       buildCreateData(input, agentId),
+      transaction,
+    );
+    const photos = await attachPhotoBatchToProperty(
+      input.photoBatchId,
+      session,
+      created.id,
+      input.coverUploadId,
       transaction,
     );
 
@@ -190,11 +342,27 @@ export const createProperty = async (
         title: created.title,
         agentId: created.agentId,
         status: created.status,
+        photoCount: photos.length,
       },
       request: auditContext.request,
     });
 
-    return toPropertyResponse(created);
+    await recordAuditEventInTransaction(transaction, {
+      scope: AuditScope.BUSINESS,
+      action: "PROPERTY_PHOTOS_ATTACHED",
+      actor: auditContext.actor,
+      entityType: "PROPERTY",
+      entityId: created.id,
+      changes: {
+        photoIds: photos.map((photo) => photo.id),
+        photoBatchId: input.photoBatchId,
+        coverPhotoId:
+          photos.find((photo) => photo.isCover)?.id ?? null,
+      },
+      request: auditContext.request,
+    });
+
+    return toPropertyResponse(created, photos);
   });
 };
 
@@ -209,7 +377,8 @@ export const getProperty = async (
   }
 
   assertPropertyAccess(property.agentId, session);
-  return toPropertyResponse(property);
+  const photos = await findPhotosByPropertyId(propertyId);
+  return toPropertyResponse(property, photos);
 };
 
 const buildUpdateData = (
@@ -384,7 +553,8 @@ export const updateProperty = async (
       });
     }
 
-    return toPropertyResponse(updated);
+    const photos = await findPhotosByPropertyId(propertyId, transaction);
+    return toPropertyResponse(updated, photos);
   });
 };
 

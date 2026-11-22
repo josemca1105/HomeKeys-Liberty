@@ -2,10 +2,12 @@ import {
   createProperty,
   deleteProperty,
   getProperty,
+  listProperties,
   updateProperty,
 } from "../services/property-service";
 import type {
   CreatePropertyInput,
+  ListPropertiesQuery,
   UpdatePropertyInput,
 } from "../types/property";
 import type { PropertyIdParams } from "../validators/property-validators";
@@ -27,6 +29,20 @@ export const addProperty = asyncHandler(async (req, res): Promise<void> => {
     data: { property },
   });
 });
+
+export const getProperties = asyncHandler(
+  async (req, res): Promise<void> => {
+    const session = requireSession(req);
+    const query = req.validatedQuery as ListPropertiesQuery;
+    const { properties, pagination } = await listProperties(query, session);
+
+    res.status(200).json({
+      success: true,
+      message: "Captaciones obtenidas exitosamente.",
+      data: { properties, pagination },
+    });
+  },
+);
 
 export const getPropertyById = asyncHandler(
   async (req, res): Promise<void> => {

@@ -11,6 +11,7 @@ import {
   cleanupExpiredRevokedTokens,
   cleanupStaleLoginAttempts,
 } from "./services/token-cleanup-service";
+import { cleanupExpiredPhotoBatches } from "./services/property-photo-batch-service";
 
 const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const EMAIL_OUTBOX_INTERVAL_MS = 60 * 1000;
@@ -77,6 +78,14 @@ const runTokenCleanup = async (): Promise<void> => {
 
     if (deletedEmails > 0) {
       console.log(`Removed ${deletedEmails} old queued emails.`);
+    }
+
+    const deletedPhotoBatches = await cleanupExpiredPhotoBatches();
+
+    if (deletedPhotoBatches > 0) {
+      console.log(
+        `Removed ${deletedPhotoBatches} expired photo batches.`,
+      );
     }
   } catch (error) {
     console.error("Failed to clean up expired tokens.", error);

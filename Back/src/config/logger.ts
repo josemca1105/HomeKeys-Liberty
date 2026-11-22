@@ -13,6 +13,7 @@ export const createLogger = () => {
         "req.body.newPassword",
         "req.body.token",
         "req.body.resetToken",
+        'req.headers["x-photo-upload-token"]',
         'res.headers["set-cookie"]',
       ],
       censor: "[REDACTED]",

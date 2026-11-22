@@ -8,14 +8,18 @@
  * 1. User               — System users (agents and administrators)
  * 2. Property           — Captured real estate properties
  * 3. Photo              — Property photos stored in object storage
- * 4. RevokedToken       — Revoked JWT blocklist
- * 5. PasswordResetToken — Temporary password reset tokens
+ * 4. PropertyPhotoBatch — Temporary pre-creation photo upload session
+ * 5. PropertyPhotoUpload— Validated photo waiting to be attached
+ * 6. RevokedToken       — Revoked JWT blocklist
+ * 7. PasswordResetToken — Temporary password reset tokens
  * Enums:
  * - Role:           ADMIN, PARTNER
  * - PropertyType:   HOUSE, APARTMENT, TOWNHOUSE, LAND, COMMERCIAL, OFFICE, WAREHOUSE, FARM
  * - ListingType:    SALE, RENT
  * - PropertyStatus: ACTIVE, PAUSED, CLOSED
  * - Currency:       USD
+ * - PropertyPhotoBatchStatus:  OPEN, CONSUMED, EXPIRED
+ * - PropertyPhotoUploadStatus: READY, CONSUMED
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -64,6 +68,17 @@ enum Currency {
   USD
 }
 
+enum PropertyPhotoBatchStatus {
+  OPEN
+  CONSUMED
+  EXPIRED
+}
+
+enum PropertyPhotoUploadStatus {
+  READY
+  CONSUMED
+}
+
 enum EmailType {
   INVITATION
   PASSWORD_RESET
@@ -102,6 +117,7 @@ model User {
   mustChangePassword Boolean @default(false) @map("must_change_password")
 
   properties          Property[]
+  photoBatches        PropertyPhotoBatch[]
   revokedTokens       RevokedToken[]
   passwordResetTokens PasswordResetToken[]
   passwordHistory     PasswordHistory[]
@@ -110,12 +126,12 @@ model User {
   @@map("users")
 }
 
-// A captured property is always assigned to a PARTNER. The owner is an
-// external contact and deliberately does not require a User account.
+// A capture is assigned to an active system user: ADMIN or PARTNER. The
+// property owner is an external contact and deliberately has no User account.
 model Property {
   id           Int            @id @default(autoincrement())
   agentId      Int            @map("agent_id")
-  code         String         @unique @default(dbgenerated("('HK-' || to_char(CURRENT_DATE, 'YYYY') || '-' || lpad(nextval('property_code_seq')::text, 6, '0'))")) @db.VarChar(50)
+  code         String         @unique @default(dbgenerated("('HK-' || lpad(nextval('property_code_seq')::text, 4, '0'))")) @db.VarChar(50)
   title        String         @db.VarChar(200)
   propertyType PropertyType   @map("property_type")
   listingType  ListingType    @map("listing_type")
@@ -197,6 +213,45 @@ model Photo {
   // A separate partial unique index guarantees one cover per property.
   @@index([propertyId, sortOrder])
   @@map("photos")
+}
+
+// Photos are uploaded and validated before the capture exists. Only READY
+// uploads from an OPEN batch owned by the actor can be attached atomically.
+model PropertyPhotoBatch {
+  id        String                   @id @default(uuid()) @db.Uuid
+  userId    Int                      @map("user_id")
+  status    PropertyPhotoBatchStatus @default(OPEN)
+  expiresAt DateTime                 @map("expires_at")
+  createdAt DateTime                 @default(now()) @map("created_at")
+  updatedAt DateTime                 @updatedAt @map("updated_at")
+
+  user    User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploads PropertyPhotoUpload[]
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@map("property_photo_batches")
+}
+
+model PropertyPhotoUpload {
+  id         String                    @id @default(uuid()) @db.Uuid
+  batchId    String                    @map("batch_id") @db.Uuid
+  storageKey String                    @unique @map("storage_key") @db.VarChar(500)
+  mimeType   String                    @map("mime_type") @db.VarChar(100)
+  sizeBytes  Int                       @map("size_bytes")
+  width      Int
+  height     Int
+  altText    String?                   @map("alt_text") @db.VarChar(300)
+  sortOrder  Int                       @default(0) @map("sort_order")
+  status     PropertyPhotoUploadStatus @default(READY)
+  consumedAt DateTime?                 @map("consumed_at")
+  createdAt  DateTime                  @default(now()) @map("created_at")
+  updatedAt  DateTime                  @updatedAt @map("updated_at")
+
+  batch PropertyPhotoBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, status, sortOrder])
+  @@map("property_photo_uploads")
 }
 
 model RevokedToken {

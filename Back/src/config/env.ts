@@ -102,6 +102,49 @@ const environmentSchema = z.object({
     .string()
     .default("http://localhost:5173/reset-password"),
   APP_BASE_URL: z.string().default("http://localhost:5173"),
+  STORAGE_DRIVER: z
+    .enum(["local", "r2"], {
+      error: "STORAGE_DRIVER must be local or r2.",
+    })
+    .default("local"),
+  LOCAL_STORAGE_DIR: z.string().default("storage"),
+  S3_ENDPOINT: z.string().default(""),
+  S3_REGION: z.string().default("auto"),
+  S3_BUCKET: z.string().default(""),
+  S3_ACCESS_KEY_ID: z.string().default(""),
+  S3_SECRET_ACCESS_KEY: z.string().default(""),
+}).superRefine((value, context) => {
+  if (value.STORAGE_DRIVER !== "r2") {
+    return;
+  }
+
+  const requiredR2Settings = [
+    ["S3_ENDPOINT", value.S3_ENDPOINT],
+    ["S3_BUCKET", value.S3_BUCKET],
+    ["S3_ACCESS_KEY_ID", value.S3_ACCESS_KEY_ID],
+    ["S3_SECRET_ACCESS_KEY", value.S3_SECRET_ACCESS_KEY],
+  ] as const;
+
+  for (const [field, setting] of requiredR2Settings) {
+    if (setting === "") {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is required when STORAGE_DRIVER is r2.`,
+      });
+    }
+  }
+
+  if (
+    value.S3_ENDPOINT !== "" &&
+    !/^https:\/\//i.test(value.S3_ENDPOINT)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["S3_ENDPOINT"],
+      message: "S3_ENDPOINT must use HTTPS.",
+    });
+  }
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

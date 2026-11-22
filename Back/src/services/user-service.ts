@@ -136,7 +136,7 @@ const userHasOpenPropertiesError = (): AppError => {
     statusCode: 409,
     code: "USER_HAS_OPEN_PROPERTIES",
     message:
-      "El PARTNER tiene captaciones activas o pausadas. Reasígnalas antes de desactivar la cuenta.",
+      "El usuario tiene captaciones activas o pausadas. Reasígnalas o ciérralas antes de desactivar la cuenta.",
   });
 };
 
@@ -481,7 +481,7 @@ export const updateUserByAdmin = async (
         const isReactivating =
           input.isActive === true && !targetUser.isActive;
 
-        if (isDeactivating && targetUser.role === Role.PARTNER) {
+        if (isDeactivating) {
           const openPropertyCount = await countOpenPropertiesByAgentId(
             targetUserId,
             transaction,

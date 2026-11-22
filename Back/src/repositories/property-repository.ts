@@ -12,6 +12,33 @@ export const findPropertyById = async (
   });
 };
 
+export interface FindPropertiesPageOptions {
+  where: Prisma.PropertyWhereInput;
+  orderBy: Prisma.PropertyOrderByWithRelationInput[];
+  skip: number;
+  take: number;
+}
+
+export const findPropertiesPage = async ({
+  where,
+  orderBy,
+  skip,
+  take,
+}: FindPropertiesPageOptions): Promise<Property[]> => {
+  return prisma.property.findMany({
+    where,
+    orderBy,
+    skip,
+    take,
+  });
+};
+
+export const countProperties = async (
+  where: Prisma.PropertyWhereInput,
+): Promise<number> => {
+  return prisma.property.count({ where });
+};
+
 export const createPropertyRecord = async (
   data: Prisma.PropertyUncheckedCreateInput,
   client: PropertyRepositoryClient = prisma,

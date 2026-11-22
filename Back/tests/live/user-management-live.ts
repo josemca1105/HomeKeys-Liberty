@@ -21,7 +21,7 @@ import { processEmailOutboxBatch } from "../../src/services/email-outbox-service
 import { hashPassword } from "../../src/utils/password";
 
 const LIVE_SUFFIX = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-const LIVE_PROPERTY_CODE = `HK-${new Date().getUTCFullYear()}-${Date.now()}`;
+const LIVE_PROPERTY_CODE = `HK-${Date.now()}`;
 const LIVE_ADMIN_PASSWORD = "Live-Admin-Password1!";
 const LIVE_PARTNER_PASSWORD = "Live-Partner-Password1!";
 const LIVE_CHANGED_PASSWORD = "Live-Changed-Password1!";

@@ -92,20 +92,51 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
   const createAsPartner = async (
     overrides: Record<string, unknown> = {},
   ): Promise<request.Response> => {
+    const batch = database.addReadyPhotoBatch(2);
+
     return request(app)
       .post("/api/v1/properties")
       .set("Authorization", `Bearer ${partnerToken}`)
-      .send(createPropertyPayload(overrides));
+      .send(
+        createPropertyPayload({
+          photoBatchId: batch.batch.id,
+          ...overrides,
+        }),
+      );
   };
 
   const createAsAdmin = async (
     agentId: number,
     overrides: Record<string, unknown> = {},
   ): Promise<request.Response> => {
+    const batch = database.addReadyPhotoBatch(1);
+
     return request(app)
       .post("/api/v1/properties")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send(createPropertyPayload({ agentId, ...overrides }));
+      .send(
+        createPropertyPayload({
+          agentId,
+          photoBatchId: batch.batch.id,
+          ...overrides,
+        }),
+      );
+  };
+
+  const createAsAdminForSelf = async (
+    overrides: Record<string, unknown> = {},
+  ): Promise<request.Response> => {
+    const batch = database.addReadyPhotoBatch(1);
+
+    return request(app)
+      .post("/api/v1/properties")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send(
+        createPropertyPayload({
+          photoBatchId: batch.batch.id,
+          ...overrides,
+        }),
+      );
   };
 
   it("lets a PARTNER create its own complete capture", async () => {
@@ -115,7 +146,7 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     const property = response.body.data.property;
 
     assert.equal(property.agentId, 2);
-    assert.match(property.code, /^HK-\d{4}-\d{6}$/);
+    assert.match(property.code, /^HK-\d{4,}$/);
     assert.equal(property.status, PropertyStatus.ACTIVE);
     assert.equal(property.currency, "USD");
     assert.equal(property.price, "150000.50");
@@ -129,8 +160,15 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     assert.equal(property.isFurnished, false);
     assert.equal(property.videoUrl, "https://videos.example.com/property/1");
     assert.equal(!("passwordHash" in property), true);
+    assert.equal(property.photos.length, 5);
+    assert.equal(
+      property.photos.filter((photo: { isCover: boolean }) => photo.isCover)
+        .length,
+      1,
+    );
 
     assert.equal(database.properties.length, 1);
+    assert.equal(database.photos.length, 5);
     assert.equal(
       database.auditLogs.some(
         (log) =>
@@ -154,14 +192,15 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     );
   });
 
-  it("requires ADMIN to select an active PARTNER and forbids PARTNER assignment", async () => {
-    const missingAgent = await request(app)
-      .post("/api/v1/properties")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send(createPropertyPayload());
+  it("lets ADMIN create for itself and forbids PARTNER assignment", async () => {
+    const adminOwned = await createAsAdminForSelf();
 
-    assert.equal(missingAgent.status, 400);
-    assert.equal(missingAgent.body.code, "PROPERTY_AGENT_REQUIRED");
+    assert.equal(adminOwned.status, 201);
+    assert.equal(adminOwned.body.data.property.agentId, 1);
+
+    const explicitlyAdminOwned = await createAsAdmin(1);
+    assert.equal(explicitlyAdminOwned.status, 201);
+    assert.equal(explicitlyAdminOwned.body.data.property.agentId, 1);
 
     const partnerAttempt = await createAsPartner({ agentId: 1 });
     assert.equal(partnerAttempt.status, 403);
@@ -175,19 +214,19 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     assert.equal(createdForPartner.body.data.property.agentId, 2);
   });
 
-  it("rejects invalid agents and inactive PARTNERs", async () => {
-    const invalidAgent = await createAsAdmin(1);
+  it("rejects unknown and inactive assignees", async () => {
+    const invalidAgent = await createAsAdmin(9999);
     assert.equal(invalidAgent.status, 422);
     assert.equal(invalidAgent.body.code, "INVALID_PROPERTY_AGENT");
 
-    await addPartner(3, "inactive@example.com");
+    await addPartner(4, "inactive@example.com");
     const deactivate = await request(app)
-      .patch("/api/v1/users/3")
+      .patch("/api/v1/users/4")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ isActive: false });
     assert.equal(deactivate.status, 200);
 
-    const inactiveAgent = await createAsAdmin(3);
+    const inactiveAgent = await createAsAdmin(4);
     assert.equal(inactiveAgent.status, 409);
     assert.equal(inactiveAgent.body.code, "PROPERTY_AGENT_INACTIVE");
   });
@@ -207,7 +246,7 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
       true,
     );
 
-    const unknownField = await createAsPartner({ code: "HK-2026-000001" });
+    const unknownField = await createAsPartner({ code: "HK-0001" });
     assert.equal(unknownField.status, 400);
     assert.equal(unknownField.body.code, "VALIDATION_ERROR");
 
@@ -400,7 +439,7 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     const invalidReassignment = await request(app)
       .patch(`/api/v1/properties/${propertyId}`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ agentId: 1 });
+      .send({ agentId: 9999 });
     assert.equal(invalidReassignment.status, 422);
     assert.equal(invalidReassignment.body.code, "INVALID_PROPERTY_AGENT");
 
@@ -465,6 +504,27 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
     assert.equal(database.users[1]?.isActive, true);
   });
 
+  it("blocks deactivation while another ADMIN has open captures", async () => {
+    database.addUser({
+      id: 4,
+      email: "second-admin-properties@example.com",
+      role: Role.ADMIN,
+      password: TEST_NEW_USER_PASSWORD,
+    });
+
+    const adminOwned = await createAsAdmin(4);
+    assert.equal(adminOwned.status, 201);
+    assert.equal(adminOwned.body.data.property.agentId, 4);
+
+    const blocked = await request(app)
+      .patch("/api/v1/users/4")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ isActive: false });
+
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, "USER_HAS_OPEN_PROPERTIES");
+  });
+
   it("allows deactivation after all captures are closed", async () => {
     const created = await createAsPartner();
     const propertyId = created.body.data.property.id as number;
@@ -482,5 +542,137 @@ describe("Property capture CRUD HTTP integration", { concurrency: false }, () =>
 
     assert.equal(deactivated.status, 200);
     assert.equal(deactivated.body.data.user.isActive, false);
+  });
+
+  it("lists only owned captures for PARTNER and all for ADMIN", async () => {
+    await createAsPartner({ title: "Propia uno", price: 100000 });
+    await createAsPartner({ title: "Propia dos", price: 200000 });
+    await addPartner(3, "list-partner@example.com");
+    await createAsAdmin(3, { title: "Ajena", price: 300000 });
+
+    const partnerList = await request(app)
+      .get("/api/v1/properties")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(partnerList.status, 200);
+    assert.equal(partnerList.body.data.pagination.total, 2);
+    assert.equal(
+      partnerList.body.data.properties.every(
+        (property: { agentId: number }) => property.agentId === 2,
+      ),
+      true,
+    );
+    assert.equal(partnerList.body.data.properties[0].photos.length, 5);
+
+    const adminList = await request(app)
+      .get("/api/v1/properties")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(adminList.status, 200);
+    assert.equal(adminList.body.data.pagination.total, 3);
+
+    const filteredByAgent = await request(app)
+      .get("/api/v1/properties?agentId=3")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    assert.equal(filteredByAgent.status, 200);
+    assert.equal(filteredByAgent.body.data.pagination.total, 1);
+
+    const forbiddenFilter = await request(app)
+      .get("/api/v1/properties?agentId=3")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(forbiddenFilter.status, 403);
+    assert.equal(
+      forbiddenFilter.body.code,
+      "PROPERTY_AGENT_FILTER_FORBIDDEN",
+    );
+  });
+
+  it("paginates, searches and filters captures", async () => {
+    const paused = await createAsPartner({
+      title: "Casa del Lago",
+      city: "Maracay",
+      price: 120000,
+      bedrooms: 4,
+    });
+    await request(app)
+      .patch(`/api/v1/properties/${paused.body.data.property.id}`)
+      .set("Authorization", `Bearer ${partnerToken}`)
+      .send({ status: "PAUSED" });
+    await createAsPartner({
+      title: "Apartamento Central",
+      city: "Valencia",
+      price: 80000,
+      bedrooms: 2,
+    });
+
+    const filtered = await request(app)
+      .get("/api/v1/properties?city=Maracay&bedroomsMin=3")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(filtered.status, 200);
+    assert.equal(filtered.body.data.pagination.total, 1);
+    assert.equal(filtered.body.data.properties[0].title, "Casa del Lago");
+
+    const searched = await request(app)
+      .get("/api/v1/properties?search=central")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(searched.status, 200);
+    assert.equal(searched.body.data.pagination.total, 1);
+    assert.equal(
+      searched.body.data.properties[0].title,
+      "Apartamento Central",
+    );
+
+    for (const code of ["1", "0001", "HK-0001", "hk-0001"]) {
+      const byCode = await request(app)
+        .get(`/api/v1/properties?code=${code}`)
+        .set("Authorization", `Bearer ${partnerToken}`);
+
+      assert.equal(byCode.status, 200, code);
+      assert.equal(byCode.body.data.pagination.total, 1, code);
+      assert.equal(
+        byCode.body.data.properties[0].title,
+        "Casa del Lago",
+        code,
+      );
+    }
+
+    const sorted = await request(app)
+      .get("/api/v1/properties?sortBy=price&sortOrder=asc&pageSize=1")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(sorted.status, 200);
+    assert.equal(sorted.body.data.pagination.total, 2);
+    assert.equal(sorted.body.data.pagination.totalPages, 2);
+    assert.equal(sorted.body.data.properties.length, 1);
+    assert.equal(sorted.body.data.properties[0].price, "80000.00");
+  });
+
+  it("validates list query parameters", async () => {
+    const invalidPriceRange = await request(app)
+      .get("/api/v1/properties?priceMin=100&priceMax=50")
+      .set("Authorization", `Bearer ${partnerToken}`);
+
+    assert.equal(invalidPriceRange.status, 400);
+    assert.equal(invalidPriceRange.body.code, "VALIDATION_ERROR");
+
+    for (const query of [
+      "page=0",
+      "pageSize=101",
+      "sortBy=ownerName",
+      "agentId=abc",
+      "code=ABC",
+      "unknown=value",
+    ]) {
+      const response = await request(app)
+        .get(`/api/v1/properties?${query}`)
+        .set("Authorization", `Bearer ${partnerToken}`);
+
+      assert.equal(response.status, 400, query);
+      assert.equal(response.body.code, "VALIDATION_ERROR");
+    }
   });
 });

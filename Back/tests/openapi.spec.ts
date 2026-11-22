@@ -34,6 +34,21 @@ const EXPECTED_PATHS = [
   "/api/v1/users/{id}/send-password-reset",
   "/api/v1/users/{id}/resend-invitation",
   "/api/v1/audit-logs",
+  "/api/v1/property-photo-batches",
+  "/api/v1/property-photo-batches/{batchId}",
+  "/api/v1/property-photo-batches/{batchId}/photos/upload-url",
+  "/api/v1/property-photo-batches/{batchId}/photos/confirm",
+  "/api/v1/property-photo-batches/{batchId}/photos/{uploadId}",
+  "/api/v1/property-photo-batches/{batchId}/photos/{uploadId}/content",
+  "/api/v1/properties",
+  "/api/v1/properties/{id}",
+  "/api/v1/properties/{id}/photos/upload-url",
+  "/api/v1/properties/{id}/photos/confirm",
+  "/api/v1/properties/{id}/photos/order",
+  "/api/v1/properties/{id}/photos/{photoId}/cover",
+  "/api/v1/properties/{id}/photos/{photoId}",
+  "/api/v1/properties/{id}/photos/{photoId}/content",
+  "/api/v1/property-photos/local-upload",
 ];
 
 const resolvePointer = (ref: string): unknown => {
@@ -123,6 +138,39 @@ describe("OpenAPI contract", () => {
           `${method.toUpperCase()} ${pathName} has no responses`,
         );
       }
+    }
+  });
+
+  it("documents the capture and photo schemas", () => {
+    const schemas = document.components?.schemas as
+      | Record<string, unknown>
+      | undefined;
+
+    assert.ok(schemas);
+
+    for (const schemaName of [
+      "Property",
+      "PropertyPhoto",
+      "PropertyPhotoBatch",
+      "PropertyPhotoUpload",
+      "PhotoBatchResponse",
+      "PhotoUploadResponse",
+      "ConfirmBatchPhotoRequest",
+      "CreatePropertyRequest",
+      "UpdatePropertyRequest",
+      "PhotoUploadTargetRequest",
+      "ConfirmPhotoRequest",
+      "ReorderPhotosRequest",
+      "PropertyResponse",
+      "PropertyListResponse",
+      "PhotoResponse",
+      "PhotoListResponse",
+    ]) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(schemas, schemaName),
+        true,
+        `Missing schema: ${schemaName}`,
+      );
     }
   });
 

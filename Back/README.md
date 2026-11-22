@@ -2,7 +2,7 @@
 
 Backend API for **HomeKeys Liberty**, built with Node.js, Express, TypeScript, PostgreSQL, and Prisma ORM.
 
-Iteration 1 includes the backend foundation, database migrations, administrator seed, JWT authentication, token revocation, and administrator-managed user creation. This iteration adds user editing, self-service password changes, administrator-managed user deletion, and email-based password recovery.
+The backend includes migrations, administrator bootstrap, JWT authentication, user management, durable email delivery, audit history, property captures, filtered pagination and pre-signed photo storage with server-side image processing.
 
 ## Tech stack
 
@@ -15,6 +15,8 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - JSON Web Tokens
 - bcrypt
 - express-rate-limit
+- Cloudflare R2 through the S3-compatible AWS SDK
+- Sharp for image validation and WebP conversion
 - Node.js test runner and Supertest
 
 ## Features
@@ -47,13 +49,20 @@ Iteration 1 includes the backend foundation, database migrations, administrator 
 - 24-month audit retention (configurable with `AUDIT_RETENTION_MONTHS`).
 - Hourly cleanup of expired revoked tokens, stale login attempts and expired audit rows.
 - Public `/health` (liveness) and `/ready` (database readiness) endpoints for orchestration.
+- Property captures for PARTNER and ADMIN, with ownership, automatic internal codes, lifecycle states and soft deletion.
+- Paginated capture listing with search, location/type/price/room filters and sorting.
+- Atomic capture creation with a pre-validated photo batch containing between 5 and 20 photos.
+- Pre-signed photo uploads through Cloudflare R2, plus a signed local-development upload flow.
+- Server-side image validation and WebP conversion with Sharp, including EXIF/GPS metadata removal.
+- Exactly one cover photo, selectable during creation and manual ordering afterward.
+- A fixed minimum of 5 photos is preserved for the full capture lifetime; deletion below 5 returns `MINIMUM_PHOTOS_REQUIRED`.
 - OpenAPI 3.1 contract validated by the test suite.
 - `npm run verify` plus a versioned pre-push hook; optional manual GitHub workflow.
 - Live Redis rate-limit check for shared counters and fail-open behavior.
 - Centralized validation and error handling, including 413 payload responses.
-- Automated HTTP integration tests with isolated Prisma test doubles.
+- Automated HTTP integration tests with isolated Prisma test doubles and in-memory object storage.
 - Helmet security headers.
-- Postman collection for the main authentication and authorization flows.
+- Postman collection for authentication, users, audits, captures and photos.
 
 ## Project structure
 
@@ -80,6 +89,7 @@ Back/
 │   ├── validators/
 │   ├── app.ts
 │   └── server.ts
+├── storage/ # Local photo objects; ignored by Git
 ├── tests/
 │   ├── helpers/
 │   ├── live/
@@ -134,6 +144,13 @@ Configure these variables in `.env`:
 | `SMTP_FROM` | Optional sender header, for example `HomeKeys Liberty <user@example.com>`. |
 | `PASSWORD_RESET_BASE_URL` | Frontend page that reads the recovery token from the URL fragment (`#token=<token>`) in recovery and invitation emails. The fragment never reaches the server, so the token stays out of server logs, proxies and `Referer` headers. |
 | `APP_BASE_URL` | Frontend entry page used by the "Iniciar sesión" button in notice emails. |
+| `STORAGE_DRIVER` | `local` for development or `r2` for Cloudflare R2. Defaults to `local`. |
+| `LOCAL_STORAGE_DIR` | Directory for local photo objects. Defaults to `storage` and is ignored by Git. |
+| `S3_ENDPOINT` | HTTPS S3-compatible endpoint, for example `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. Required for R2. |
+| `S3_REGION` | S3 signing region. Defaults to `auto`, which is correct for R2. |
+| `S3_BUCKET` | Private R2 bucket used for original uploads and processed WebP photos. |
+| `S3_ACCESS_KEY_ID` | R2 access key ID. Never commit it. |
+| `S3_SECRET_ACCESS_KEY` | R2 secret access key. Never commit it. |
 
 Connection string format:
 
@@ -156,6 +173,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 The API requires at least 64 characters, at least 16 distinct characters, and rejects placeholders such as `REPLACE_WITH...` or `CHANGE_ME...`. The value in `.env.example` is intentionally invalid, so the API will not start until you replace it.
 
 Never commit the real `.env` file. It is excluded by `Back/.gitignore`; only `.env.example` should be committed.
+
+### Photo storage
+
+- With `STORAGE_DRIVER=local`, upload URLs point to a fixed local endpoint and the short-lived HMAC token travels in the `X-Photo-Upload-Token` header, so it is never written to request URLs or logs. Files are written under `LOCAL_STORAGE_DIR`; the directory is ignored by Git.
+- With `STORAGE_DRIVER=r2`, the API returns a pre-signed R2 `PUT` URL. The bucket should stay private; photos are read through the authenticated capture content endpoint, which enforces ownership.
+- Configure the R2 bucket CORS policy to allow `PUT` from the frontend origin and the headers returned by the upload target.
+- A bucket lifecycle rule should delete objects under `properties/*/uploads/*` and `property-photo-batches/*/uploads/*` after one day. These are temporary pre-signed uploads. Confirmed batch photos live under `property-photo-batches/*/photos/*` and are removed by the batch cleanup job if the batch expires before capture creation.
+- Uploaded bytes are never trusted by extension: Sharp checks the real format, rejects GIF/SVG and other formats, strips EXIF/GPS metadata and re-encodes as WebP.
 
 ### Rate limiting and reverse proxies
 
@@ -210,15 +235,22 @@ The seed is idempotent: running it again does not duplicate accounts or overwrit
 
 The current physical database schema is entirely in English:
 
-- Tables: `users`, `properties`, `photos`, `revoked_tokens`, `password_reset_tokens`, `password_history`, `login_attempts`, `email_outbox`, and `audit_logs`.
+- Tables: `users`, `properties`, `photos`, `property_photo_batches`, `property_photo_uploads`, `revoked_tokens`, `password_reset_tokens`, `password_history`, `login_attempts`, `email_outbox`, and `audit_logs`.
 - User fields include `first_name`, `last_name`, `email`, `password_hash`, `phone`, `photo_url`, `role`, and `password_changed_at`. The `email` column uses PostgreSQL `citext`, so case-insensitive duplicates are rejected by the database itself, not only by the API validators.
 - Token fields include `token_hash`, `user_id`, and `expires_at`.
 - Roles: `ADMIN` and `PARTNER`.
-- Property categories: `House`, `Apartment`, and `Commercial`.
-- Property listing types: `Sale` and `Rent`.
-- Property statuses: `Active` and `Inactive`.
+- Property types: `HOUSE`, `APARTMENT`, `TOWNHOUSE`, `LAND`, `COMMERCIAL`, `OFFICE`, `WAREHOUSE` and `FARM`.
+- Listing types: `SALE` and `RENT`. Rent prices are monthly.
+- Property statuses: `ACTIVE`, `PAUSED` and `CLOSED`.
+- Currency: `USD` only. Monetary and area values use `DECIMAL` and are returned as fixed strings.
+- Captures store an external owner contact without creating a user account, exact WGS84 coordinates and the full business form.
+- `properties.code` is generated by PostgreSQL as `HK-0001` (minimum four digits, no embedded year) and cannot be supplied by clients. The year is derived in the frontend from `createdAt`.
+- A partial unique index enforces one cover photo per non-empty capture; photos store object keys and metadata, never binary data.
+- Temporary `property_photo_batches` and `property_photo_uploads` hold validated photos before creation. A batch expires after 120 minutes and is scoped to its owner.
+- Capture creation consumes a batch atomically and requires 5–20 READY photos.
+- Soft deletion sets `properties.deleted_at`; normal reads exclude deleted captures.
 - `revoked_tokens` and `password_reset_tokens` reference `users` with `ON DELETE CASCADE`.
-- Indexed lookups: user list ordering (`created_at`, `id`), token revocation and recovery by `user_id`, properties by `agent_id`, photos by `property_id`, and audit queries by actor, scope, entity and creation time.
+- Indexed lookups: user list ordering (`created_at`, `id`), token revocation and recovery by `user_id`, captures by agent/status/type/location, photos by property/order, and audit queries by actor, scope, entity and creation time.
 - `audit_logs` is append-only, has no foreign key to `users` (history survives user deletion), and stores actor snapshots plus an optional JSONB `changes` document.
 
 ## Available scripts
@@ -495,7 +527,7 @@ Validation rules:
 - `photoUrl` must be an absolute `http` or `https` URL without embedded credentials; `null` clears it. Literal localhost, private, link-local and internal hosts are rejected.
 - `email` is normalized to lowercase and must stay unique; conflicts return `409 EMAIL_ALREADY_REGISTERED`. Changing the email also deletes every pending invitation or password recovery link, because those links were delivered to the previous address, and sends a notice to the previous address. The notice never includes the new address, so a compromised old mailbox cannot learn where the account moved; delivery is best-effort and never fails the update.
 - `role` accepts only `ADMIN` or `PARTNER`.
-- `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, deletes pending invitation or recovery links, and emails a deactivation notice to the user. Reactivation invalidates every session issued before the deactivation, emails a reactivation notice, and requires signing in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
+- `isActive` deactivates or reactivates the account. Deactivation blocks future logins and existing sessions with `403 ACCOUNT_INACTIVE`, deletes pending invitation or recovery links, and emails a deactivation notice to the user. A user—including another `ADMIN`—with open `ACTIVE` or `PAUSED` captures must be reassigned or have those captures closed first (`409 USER_HAS_OPEN_PROPERTIES`). Reactivation invalidates every session issued before the deactivation, emails a reactivation notice, and requires signing in again. An `ADMIN` cannot deactivate itself (`409 SELF_DEACTIVATION_NOT_ALLOWED`).
 - Demoting or deactivating the last active `ADMIN` is blocked with `409 LAST_ADMIN_REQUIRED`; inactive administrators do not count. An `ADMIN` can demote itself whenever another active `ADMIN` remains. The check and the update run in the same serializable transaction, so concurrent changes cannot leave the system without active administrators.
 
 Passwords are never set through this endpoint. To let a user define a new password, use `POST /users/:id/send-password-reset`.
@@ -568,7 +600,7 @@ Deletion rules:
 - A user with registered properties cannot be deleted: `409 USER_HAS_PROPERTIES`. Property data is never removed automatically; reassign or delete those properties first after an explicit product decision.
 - Users without relations are deleted in a single transaction that also removes their `revoked_tokens` and `password_reset_tokens` rows.
 
-To disable access without deleting anything, use `PATCH /users/:id` with `"isActive": false`: the account keeps its history, properties, and audit trail, while logins and existing sessions are blocked. Physical deletion remains available for accounts without properties when the product explicitly wants them gone.
+To disable access without deleting anything, first reassign or close every `ACTIVE`/`PAUSED` capture and then use `PATCH /users/:id` with `"isActive": false`: the account keeps its history, properties, and audit trail, while logins and existing sessions are blocked. Physical deletion remains available for accounts without properties when the product explicitly wants them gone.
 
 Possible responses:
 
@@ -579,6 +611,96 @@ Possible responses:
 - `409 SELF_DELETION_NOT_ALLOWED`: the target is the authenticated administrator.
 - `409 LAST_ADMIN_REQUIRED`: the target is the last administrator.
 - `409 USER_HAS_PROPERTIES`: the target still owns properties.
+
+## Property captures
+
+All capture endpoints require authentication. Every active user—`ADMIN` or `PARTNER`—can own captures. A `PARTNER` only sees and modifies its own captures; `ADMIN` can access every capture, create its own, assign another active user, reopen closed captures and soft-delete captures.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/property-photo-batches` | Start a temporary pre-creation photo batch. |
+| `GET` | `/api/v1/property-photo-batches/:batchId` | Read an owned open batch. |
+| `POST` | `/api/v1/property-photo-batches/:batchId/photos/upload-url` | Pre-signed batch upload target. |
+| `POST` | `/api/v1/property-photo-batches/:batchId/photos/confirm` | Validate and mark a batch photo READY. |
+| `GET` | `/api/v1/property-photo-batches/:batchId/photos/:uploadId/content` | Preview a temporary photo. |
+| `DELETE` | `/api/v1/property-photo-batches/:batchId/photos/:uploadId` | Remove a temporary photo. |
+| `POST` | `/api/v1/properties` | Atomically create a capture with 5–20 photos. |
+| `GET` | `/api/v1/properties` | Paginated, filtered capture list. |
+| `GET` | `/api/v1/properties/:id` | Read a capture and its ordered photos. |
+| `PATCH` | `/api/v1/properties/:id` | Edit data, status, coordinates or agent. |
+| `DELETE` | `/api/v1/properties/:id` | ADMIN soft delete. |
+| `POST` | `/api/v1/properties/:id/photos/upload-url` | Create a pre-signed upload target. |
+| `POST` | `/api/v1/properties/:id/photos/confirm` | Validate and attach an uploaded photo. |
+| `GET` | `/api/v1/properties/:id/photos/:photoId/content` | Download an authorized photo. |
+| `PATCH` | `/api/v1/properties/:id/photos/order` | Reorder every photo. |
+| `PATCH` | `/api/v1/properties/:id/photos/:photoId/cover` | Select the cover. |
+| `DELETE` | `/api/v1/properties/:id/photos/:photoId` | Delete a photo and its object. |
+
+### Create and edit captures
+
+A `PARTNER` creates its own capture and cannot send `agentId`. An `ADMIN` creates for itself when `agentId` is omitted; it may instead send the ID of any active `ADMIN` or `PARTNER`. Every creation must include `photoBatchId` referencing an owned OPEN batch with 5–20 READY photos. `coverUploadId` is optional and must belong to the same batch; without it, the first photo is the cover. Unknown fields, a client-supplied `code`, `currency`, `status` on create and incomplete bodies are rejected.
+
+Capture creation and photo attachment share one transaction. If the batch has fewer than five photos, the transaction fails with `422 MINIMUM_PHOTOS_REQUIRED` and no capture row is created.
+
+Required fields include `title`, `propertyType`, `listingType`, `ownerName`, `ownerPhone`, `address`, `city`, `state`, `latitude`, `longitude`, `price`, `bedrooms`, `bathrooms`, `parkingSpaces` and `squareMeters`. The property type catalog is:
+
+```text
+HOUSE | APARTMENT | TOWNHOUSE | LAND | COMMERCIAL | OFFICE | WAREHOUSE | FARM
+```
+
+The internal code follows the global sequence `HK-0001`, `HK-0002`, and keeps growing after `HK-9999`; it never resets annually and deleted codes are never reused. The creation date is not part of the code: the frontend should show `createdAt` as “Captación realizada el …”.
+
+Coordinates are mandatory in the initial form and must be inside valid WGS84 ranges. On update, latitude and longitude must be sent together. Money and areas are returned as strings:
+
+```json
+{
+  "price": "150000.00",
+  "maintenanceFee": "80.00",
+  "squareMeters": "120.50",
+  "currency": "USD"
+}
+```
+
+Status rules:
+
+- `ACTIVE`: normal operation.
+- `PAUSED`: temporarily unavailable; the responsible user can pause/resume its own capture and an `ADMIN` can manage any capture.
+- `CLOSED`: a `PARTNER` can close its own capture, but cannot edit or reopen it. Only `ADMIN` can reopen or edit a closed capture.
+- Before deactivating any user, including another `ADMIN`, open `ACTIVE` or `PAUSED` captures must be reassigned or closed. The API answers `409 USER_HAS_OPEN_PROPERTIES` otherwise.
+- Deleting a capture is a soft delete (`deletedAt`) available only to `ADMIN`; normal reads answer `404 PROPERTY_NOT_FOUND`.
+
+### List captures
+
+`GET /api/v1/properties` accepts `page`, `pageSize`, `search`, `code`, `status`, `propertyType`, `listingType`, `state`, `city`, `neighborhood`, `priceMin`, `priceMax`, `bedroomsMin`, `bathroomsMin`, `parkingSpacesMin`, `agentId`, `sortBy` and `sortOrder`. Text search covers title, code, address, neighborhood, owner name and owner phone. Sorting accepts `createdAt`, `updatedAt`, `price` and `title`.
+
+`code` is an exact filter and accepts practical input forms: `1`, `0001`, `HK-1`, `hk-0001` and the stored `HK-0001` all resolve to the same capture. `ADMIN` may filter by any `agentId`; a `PARTNER` can only filter itself. Unknown query parameters, invalid code values and invalid price ranges return `400 VALIDATION_ERROR`.
+
+### Initial photo batch
+
+Photos are prepared before the capture exists:
+
+1. `POST /property-photo-batches` creates an owned batch valid for 120 minutes.
+2. `POST /property-photo-batches/:batchId/photos/upload-url` returns a pre-signed target for one file.
+3. Upload the binary with `PUT`, then `POST /property-photo-batches/:batchId/photos/confirm` with the storage key and optional `altText`.
+4. Repeat until the batch has at least five READY photos. `GET /property-photo-batches/:batchId` shows the batch and `GET .../photos/:uploadId/content` provides a preview.
+5. Send `photoBatchId` and optional `coverUploadId` in `POST /properties`.
+6. The server creates the capture, all photo rows, the cover and audit events in one transaction.
+7. If validation fails, the batch stays OPEN and can be corrected and reused. If the batch expires, its temporary objects are cleaned up.
+
+Limits and behavior:
+
+- Minimum 5 and maximum 20 photos for creation.
+- A capture can never be reduced below 5 photos; `DELETE .../photos/:photoId` returns `409 MINIMUM_PHOTOS_REQUIRED`.
+- Maximum 8 MB per uploaded file.
+- JPEG, PNG and WebP input only; actual format is decoded with Sharp.
+- Photos are served only through authenticated content endpoints; the R2 bucket remains private.
+- Reordering requires every current photo ID exactly once.
+- Deleting the cover promotes the first remaining photo.
+- Photo changes on a `CLOSED` capture are rejected for `PARTNER`; `ADMIN` can still manage them.
+- Additional photos after creation can still use `POST /properties/:id/photos/upload-url` and `POST /properties/:id/photos/confirm`, up to the maximum of 20.
+- Upload attempts are temporary objects. Configure the R2 lifecycle rules described above to purge abandoned uploads.
+
+Capture-specific error codes include `PROPERTY_NOT_FOUND`, `PROPERTY_CLOSED`, `PROPERTY_AGENT_ASSIGNMENT_FORBIDDEN`, `PROPERTY_AGENT_INACTIVE`, `INVALID_PROPERTY_AGENT`, `PROPERTY_AGENT_FILTER_FORBIDDEN`, `USER_HAS_OPEN_PROPERTIES`, `PHOTO_BATCH_NOT_FOUND`, `PHOTO_BATCH_EXPIRED`, `PHOTO_BATCH_NOT_OPEN`, `MINIMUM_PHOTOS_REQUIRED`, `INVALID_COVER_PHOTO`, `PHOTO_NOT_FOUND`, `PHOTO_LIMIT_REACHED`, `INVALID_PHOTO_UPLOAD_KEY`, `PHOTO_UPLOAD_NOT_FOUND`, `PHOTO_TOO_LARGE`, `INVALID_PHOTO_IMAGE` and `PHOTO_ORDER_MISMATCH`.
 
 ### Logout
 
@@ -777,7 +899,7 @@ Errors use a consistent structure:
 
 Unexpected errors return a generic Spanish message without exposing SQL queries, stack traces, tokens, or credentials.
 
-User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `USER_INACTIVE`, `INVITATION_NOT_PENDING`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, and `USER_HAS_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
+User management endpoints add these codes: `INVALID_CURRENT_PASSWORD`, `SESSION_INVALIDATED`, `ACCOUNT_INACTIVE`, `ADMIN_REQUIRED`, `USER_NOT_FOUND`, `USER_INACTIVE`, `INVITATION_NOT_PENDING`, `EMAIL_ALREADY_REGISTERED`, `LAST_ADMIN_REQUIRED`, `SELF_DELETION_NOT_ALLOWED`, `SELF_DEACTIVATION_NOT_ALLOWED`, `USER_HAS_PROPERTIES`, and `USER_HAS_OPEN_PROPERTIES`. Password recovery adds `INVALID_RESET_TOKEN`, `RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, and `TOO_MANY_RESET_ATTEMPTS`. The mandatory password change adds `PASSWORD_CHANGE_REQUIRED`, and the persistent lockout adds `ACCOUNT_LOCKED`.
 
 ## Postman collection
 
@@ -793,11 +915,11 @@ The collection is organized into five folders:
 - `Users`: `Get current user`, `Get all users` (paginated), `Get user by ID`, `Create user`, `Create user with ADMIN role`, `Update user`, `Update my profile`, `Deactivate user`, `Reactivate user`, `Send password reset link`, `Resend invitation`, `Change my password` and `Delete user`.
 - `Audit`: `Get audit history`; ADMIN sees all events, PARTNER only its own.
 - `Health`: public `Health` (liveness) and `Ready` (database readiness) probes using `rootUrl`.
-- `Captaciones`: reserved for the property/captaciones API and intentionally empty for now.
+- `Captaciones`: photo batch creation, batch upload/confirmation/preview/removal, atomic capture creation, list/get/update, pause/close/reopen, ADMIN reassignment, additional photo upload, authenticated content, cover, reorder, photo deletion and ADMIN soft deletion.
 
-Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. The collection never contains real credentials.
+Set `loginEmail`, `loginPassword`, `newUserPassword`, `targetUserId`, and `resetToken` using local values; tokens and IDs are stored in collection variables by the test scripts. `propertyAgentId` is optional: leave it empty to let an ADMIN create its own capture, or set an active ADMIN/PARTNER ID to assign that user. The collection never contains real credentials. Capture variables such as `propertyId`, `propertyCode`, `photoBatchId`, `photoBatchUploadId`, `photoUploadUrl`, `photoUploadKey`, `photoUploadToken`, `coverUploadId` and `propertyPhotoId` are populated automatically by the scripts. `Find property by code` accepts the full stored code and can also be edited to use the short numeric part. Repeat `Create batch photo upload URL`, the binary upload and `Confirm batch photo` until the batch has at least five READY photos before running `Create property`.
 
-Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Update my profile`, `Deactivate user`, `Reactivate user`, `Send password reset link`, `Resend invitation`, `Change my password`, `Delete user`, `Logout`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` queues a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
+Suggested order: `Login`, `Create user` (stores the new ID in `targetUserId`), `Update user`, `Update my profile`, `Deactivate user`, `Reactivate user`, `Send password reset link`, `Resend invitation`, `Change my password`, `Delete user`, `Logout`. For captures, log in as ADMIN and run `Create property` for self-assignment, or set `propertyAgentId` to another active user before creating; then use the stored `propertyId`. For photos, create an upload URL with the exact local file size, upload the binary to `photoUploadUrl` using `photoUploadToken` as the local header (R2 uses its pre-signed URL directly), and run `Confirm photo`. `Change my password` rotates the password of the authenticated user: on success it stores the returned token in `accessToken` and copies `newUserPassword` into `loginPassword` so `Login` keeps working. To run `Update user` or `Delete user` against another account, set `targetUserId` manually. `Forgot password` queues a real recovery email to `loginEmail`; copy the token from the received link into `resetToken` before running `Reset password`, which also copies `newUserPassword` into `loginPassword` on success.
 
 The role-specific scenarios are covered by `npm test`; the Postman collection intentionally keeps one login contract for frontend consumers.
 
@@ -857,7 +979,7 @@ Notes:
 npm test
 ```
 
-The suite uses Supertest and isolated Prisma test doubles. It does not modify PostgreSQL, require personal seed data, or send real emails: outgoing mail is captured by a test double. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, paginated user listing with search and sort, audit history and partner visibility, user editing, password changes with previous-session invalidation, deletion guards (last ADMIN, concurrent last-ADMIN demotion, self-deletion, users with properties), token cleanup on deletion, password hash exclusion from every response, password policy enforcement, the generic single-use recovery flow with non-blocking email delivery, email invitations with activation links, and the mandatory password change with its `PASSWORD_CHANGE_REQUIRED` blocking.
+The suite uses Supertest, isolated Prisma test doubles and an in-memory object storage. It does not modify PostgreSQL, require personal seed data, send real emails or contact R2: outgoing mail is captured by a test double, and one local-storage test writes only to a temporary directory removed at the end. Covered behavior includes ADMIN and PARTNER authorization, current-role revalidation, deleted accounts, idempotent logout revocation, duplicate emails, CORS, per-account login, password change and password recovery rate limiting, bcrypt byte limits, payload limits, expired-token cleanup, paginated user listing with search and sort, audit history and partner visibility, user editing, password changes with previous-session invalidation, deletion guards, token cleanup, password hash exclusion, password policy enforcement, recovery/invitation flows, mandatory password changes, capture CRUD/ownership/status/reassignment/soft deletion, capture list filters and pagination, automatic codes, deactivation guards for every role, pre-creation photo batches, atomic 5-photo minimum creation, expired/foreign/reused batches, photo upload targets, real image validation, WebP/EXIF processing, cover/order invariants, authenticated photo content, the 5-photo deletion floor and the 20-photo ceiling.
 
 There are also live checks against a real PostgreSQL database using temporary users that are removed at the end. They are not part of `npm test` and can be run with:
 
@@ -867,8 +989,11 @@ npx tsx tests/live/password-reset-live.ts
 npx tsx tests/live/invitation-live.ts
 npx tsx tests/live/email-case-live.ts
 npx tsx tests/live/audit-transaction-live.ts
+npx tsx tests/live/captaciones-live.ts
 npx tsx tests/live/redis-rate-limit-live.ts
 ```
+
+The captures live check uses a temporary local photo directory, so it does not need R2 credentials.
 
 The Redis check needs a reachable server (`RATE_LIMIT_REDIS_URL`, default `redis://localhost:6379`). Start one with `docker run --rm -p 6379:6379 redis:7` before running it.
 
@@ -953,6 +1078,10 @@ prisma/migrations/20261112140000_add_user_is_active/
 prisma/migrations/20261116120000_use_citext_email/
 prisma/migrations/20261116160000_add_password_history/
 prisma/migrations/20261118120000_add_email_outbox/
+prisma/migrations/20261118210000_add_property_capture_schema/
+prisma/migrations/20261120120000_add_property_code_generator/
+prisma/migrations/20261122120000_use_short_property_codes/
+prisma/migrations/20261122200000_add_property_photo_batches/
 ```
 
 The first one adds the nullable `users.password_changed_at` timestamp used as the session-invalidation boundary: any JWT issued before that instant is rejected with `401 SESSION_INVALIDATED`. Stateless JWTs cannot revoke unknown outstanding tokens, so this security field is required to close previous sessions after a password change.
@@ -973,14 +1102,26 @@ The eighth one creates `password_history` to reject reuse of the last 5 password
 
 The ninth one creates `email_outbox` and its enums for the durable email queue. Rows are inserted in the same transaction as the business change, claimed by the worker with a conditional update, retried with backoff and cleaned after 30 days.
 
+The tenth rebuilds the seed-only `properties` and `photos` tables for the approved capture contract: full owner contact, exact coordinates, USD amounts, broad property catalog, lifecycle states, amenities, video/tour links, photo metadata, checks and one-cover partial unique index.
+
+The eleventh adds the PostgreSQL sequence and column default that generate internal capture codes atomically.
+
+The twelfth removes the redundant year from codes, converts existing `HK-<year>-<number>` values to the short `HK-<number>` format, enforces at least four digits and keeps the global sequence intact.
+
+The thirteenth adds temporary photo batches and their READY upload rows so captures can be created atomically with five to twenty validated photos.
+
 Apply all migrations with `npx prisma migrate deploy` on environments that do not run `migrate dev`.
 
 The password recovery and invitation flows need no other migrations: they reuse the `password_reset_tokens` table created by the initial schema.
 
 ## Security notes
 
-- Never commit `.env`, `prisma/seed.ts`, personal data, or real credentials.
+- Never commit `.env`, `prisma/seed.ts`, personal data, R2 credentials, or real credentials.
 - Keep private administrator data only in the ignored local seed; commit only `prisma/seed.example.ts`.
+- Keep the R2 bucket private. Browser access to already confirmed photos goes through the authenticated content endpoint, not a public bucket URL.
+- Upload targets expire after 10 minutes. A pre-signed upload proves possession of the URL, not the declared MIME type; confirmation always decodes the real bytes and re-encodes the image.
+- Configure an R2 lifecycle rule for temporary `properties/*/uploads/*` objects to avoid orphan storage after abandoned uploads.
+- The local `storage/` directory is ignored by Git and must never be committed.
 - Use a long, random `JWT_SECRET` for every real environment. The API rejects values shorter than 64 characters, low-diversity values, leading/trailing whitespace and known placeholders, so a copied `.env.example` cannot start by accident.
 - Change bootstrap passwords before deployment.
 - Password hashes and raw revoked tokens are never returned by the API.
