@@ -12,6 +12,8 @@ Aplicación web privada para la gestión de captaciones inmobiliarias de HomeKey
 - Navegación privada de Inicio y Captaciones.
 - Listado de captaciones con búsqueda, filtros, orden y paginación.
 - Detalle de captación con galería, propietario, características y ubicación.
+- Mapa interactivo con MapLibre GL JS y OpenFreeMap.
+- Selector reutilizable de coordenadas preparado para la creación de captaciones.
 - Fotografías privadas mediante peticiones autenticadas y Object URLs.
 - Tipos generados desde el contrato OpenAPI del backend.
 - Bloqueo visual cuando `mustChangePassword` está activo.
@@ -81,6 +83,7 @@ Este proxy es una herramienta de desarrollo y vista previa. En producción, el s
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | `/api/v1` | Ruta relativa para el proxy de desarrollo o URL absoluta de la API. |
 | `VITE_APP_NAME` | `HomeKeys Liberty` | Nombre visible de la aplicación. |
+| `VITE_MAP_STYLE_URL` | `https://tiles.openfreemap.org/styles/liberty` | Estilo vectorial de OpenFreeMap para MapLibre. |
 
 Con `VITE_API_BASE_URL=/api/v1`, las peticiones son del mismo origen y CORS no interviene. Para consumir la API directamente, se puede usar una URL absoluta y configurar `CORS_ORIGINS` en el backend.
 
@@ -105,7 +108,12 @@ Las variables `VITE_*` son públicas y quedan incluidas en el bundle. No deben c
 - Las imágenes se descargan con Bearer token, se convierten en Object URLs y se revocan al desmontar.
 - Las imágenes de tarjetas se cargan al acercarse al viewport.
 - Los importes y áreas se reciben como strings Decimal y se formatean sin operar monetariamente con ellos.
-- La ubicación enlaza a OpenStreetMap externamente. MapLibre + OpenFreeMap se incorporará en una rama posterior.
+- El detalle muestra un mapa interactivo con MapLibre GL JS y mosaicos vectoriales de OpenFreeMap.
+- El enlace externo a OpenStreetMap se mantiene como alternativa y respaldo.
+- OpenFreeMap no requiere cuenta ni clave. Se muestra la atribución obligatoria del estilo.
+- El proveedor ve las peticiones de mosaicos necesarias para mostrar el mapa, pero no recibe datos del propietario ni información de la captación.
+- El mapa se carga de forma diferida al acercarse al viewport.
+- `PropertyLocationPicker` queda preparado para seleccionar coordenadas en la rama de creación; no incluye geocoding ni búsqueda por dirección.
 
 ## Comportamiento de sesión
 
@@ -151,7 +159,7 @@ src/
 ├── features/
 │   ├── auth/               # Login, sesión y protección de rutas
 │   ├── dashboard/          # Panel principal
-│   └── properties/         # Captaciones: API, filtros, listado y detalle
+│   └── properties/         # Captaciones: API, filtros, listado, detalle y mapa
 ├── hooks/                  # Hooks compartidos
 ├── lib/                    # Utilidades de JWT, clases y usuarios
 ├── test/                   # Setup, MSW, fixtures y helpers
@@ -182,3 +190,6 @@ Las pruebas cubren:
 - Alcance de PARTNER sin consultar el directorio de usuarios.
 - Detalle de captación y estado de no encontrada.
 - Descarga autenticada de fotografías y liberación de Object URLs.
+- Inicialización del mapa, interacción con el marcador y fallback de MapLibre.
+- Validación y aplicación manual de coordenadas en el selector.
+- Sincronización entre el selector de mapa y los campos de latitud/longitud.

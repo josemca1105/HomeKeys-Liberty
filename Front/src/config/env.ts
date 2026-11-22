@@ -19,6 +19,10 @@ const envSchema = z.object({
     .trim()
     .min(1, 'VITE_APP_NAME no puede estar vacío.')
     .default('HomeKeys Liberty'),
+  VITE_MAP_STYLE_URL: z
+    .string()
+    .url('VITE_MAP_STYLE_URL debe ser una URL válida.')
+    .default('https://tiles.openfreemap.org/styles/liberty'),
 })
 
 const parsedEnv = envSchema.safeParse(import.meta.env)
@@ -30,4 +34,5 @@ if (!parsedEnv.success) {
 export const env = Object.freeze({
   apiBaseUrl: parsedEnv.data.VITE_API_BASE_URL.replace(/\/+$/, ''),
   appName: parsedEnv.data.VITE_APP_NAME,
+  mapStyleUrl: parsedEnv.data.VITE_MAP_STYLE_URL,
 })
