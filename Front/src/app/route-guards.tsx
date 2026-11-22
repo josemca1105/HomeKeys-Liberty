@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router'
+import { Navigate, Outlet, useLocation } from 'react-router'
 import { SessionLoading } from '@/components/feedback/session-loading'
 import { useAuth } from '@/features/auth/auth-context'
 import type { AuthNotice } from '@/features/auth/auth.types'
@@ -23,7 +23,8 @@ export function PublicOnlyRoute() {
 }
 
 export function ProtectedRoute() {
-  const { notice, status } = useAuth()
+  const { notice, status, user } = useAuth()
+  const location = useLocation()
 
   if (status === 'initializing') {
     return <SessionLoading />
@@ -37,6 +38,10 @@ export function ProtectedRoute() {
         state={{ notice: notice ?? LOGIN_REQUIRED_NOTICE }}
       />
     )
+  }
+
+  if (user?.mustChangePassword && location.pathname !== '/dashboard') {
+    return <Navigate to="/dashboard" replace />
   }
 
   return <Outlet />

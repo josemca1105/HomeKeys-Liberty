@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useEffect } from 'react'
+import { Link } from 'react-router'
 import { AppShell } from '@/components/layout/app-shell'
 import { useAuth } from '@/features/auth/auth-context'
 import type { AuthUser, UserRole } from '@/features/auth/auth.types'
@@ -217,7 +218,7 @@ export function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-brand-slate">
-                    Próxima etapa
+                    Inventario
                   </p>
                   <h2 className="mt-1 font-display text-xl font-semibold tracking-[-0.025em] text-brand-950">
                     Captaciones
@@ -228,13 +229,16 @@ export function DashboardPage() {
                 </span>
               </div>
               <p className="mt-4 text-sm leading-6 text-ink-muted">
-                El siguiente módulo reunirá el listado, los filtros, el detalle
-                y la creación de captaciones con sus fotografías.
+                Consulta las captaciones del equipo, filtra el inventario y
+                revisa cada propiedad con sus fotografías y datos principales.
               </p>
-              <p className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700">
-                En preparación
+              <Link
+                to="/captaciones"
+                className="mt-5 inline-flex min-h-11 items-center gap-1.5 rounded-lg text-sm font-semibold text-brand-700 hover:text-brand-900"
+              >
+                Ver captaciones
                 <ChevronRight aria-hidden="true" className="size-4" />
-              </p>
+              </Link>
             </section>
           </div>
         </div>
@@ -249,7 +253,8 @@ export function DashboardPage() {
                 El panel crecerá por módulos
               </h2>
               <p className="mt-1 text-sm leading-6 text-ink-muted">
-                Primero captaciones; después usuarios, auditoría y perfil.
+                Captaciones ya está disponible. Después usuarios, auditoría y
+                perfil.
               </p>
             </div>
           </div>

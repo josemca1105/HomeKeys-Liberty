@@ -1,4 +1,4 @@
-import { LayoutDashboard, LogOut } from 'lucide-react'
+import { Building2, LayoutDashboard, LogOut } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router'
 import { BrandLogo } from '@/components/brand/brand-logo'
@@ -10,12 +10,28 @@ import { getUserInitials } from '@/lib/user'
 
 interface AppShellProps {
   children: ReactNode
+  pageTitle?: string
 }
 
 const roleLabels: Record<UserRole, string> = {
   ADMIN: 'Administrador',
   PARTNER: 'Partner',
 }
+
+const navigationItems = [
+  {
+    to: '/dashboard',
+    label: 'Inicio',
+    icon: LayoutDashboard,
+    end: true,
+  },
+  {
+    to: '/captaciones',
+    label: 'Captaciones',
+    icon: Building2,
+    end: false,
+  },
+] as const
 
 function UserAvatar({
   firstName,
@@ -39,7 +55,10 @@ function UserAvatar({
   )
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({
+  children,
+  pageTitle = 'Panel principal',
+}: AppShellProps) {
   const { user, logout } = useAuth()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
@@ -83,22 +102,32 @@ export function AppShell({ children }: AppShellProps) {
           <p className="mt-1 text-sm text-white/50">Panel interno</p>
         </div>
 
-        <nav aria-label="Navegación principal" className="relative mt-10">
-          <NavLink
-            to="/dashboard"
-            end
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-semibold transition-colors',
-                isActive
-                  ? 'bg-white/10 text-white shadow-[inset_3px_0_0_var(--color-brand-gold)]'
-                  : 'text-white/62 hover:bg-white/[0.06] hover:text-white',
-              )
-            }
-          >
-            <LayoutDashboard aria-hidden="true" className="size-4.5" />
-            Inicio
-          </NavLink>
+        <nav
+          aria-label="Navegación principal"
+          className="relative mt-10 space-y-1.5"
+        >
+          {navigationItems.map((item) => {
+            const Icon = item.icon
+
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-semibold transition-colors',
+                    isActive
+                      ? 'bg-white/10 text-white shadow-[inset_3px_0_0_var(--color-brand-gold)]'
+                      : 'text-white/62 hover:bg-white/[0.06] hover:text-white',
+                  )
+                }
+              >
+                <Icon aria-hidden="true" className="size-4.5" />
+                {item.label}
+              </NavLink>
+            )
+          })}
         </nav>
 
         <div className="relative mt-auto">
@@ -132,7 +161,7 @@ export function AppShell({ children }: AppShellProps) {
             </div>
             <div className="min-w-0">
               <p className="truncate font-display text-base font-semibold text-brand-950">
-                Panel principal
+                {pageTitle}
               </p>
               <p className="hidden text-xs text-ink-muted sm:block">
                 HomeKeys Liberty
@@ -171,11 +200,41 @@ export function AppShell({ children }: AppShellProps) {
 
         <main
           id="contenido"
-          className="app-grid flex-1 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:px-9 lg:pt-10"
+          className="app-grid flex-1 px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:px-9 lg:pb-10 lg:pt-10"
         >
           {children}
         </main>
       </div>
+
+      <nav
+        aria-label="Navegación móvil"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      >
+        <div className="grid grid-cols-2 gap-1 py-1.5">
+          {navigationItems.map((item) => {
+            const Icon = item.icon
+
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    'flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors',
+                    isActive
+                      ? 'bg-brand-700/[0.08] text-brand-800'
+                      : 'text-ink-muted hover:bg-surface hover:text-brand-900',
+                  )
+                }
+              >
+                <Icon aria-hidden="true" className="size-5" />
+                {item.label}
+              </NavLink>
+            )
+          })}
+        </div>
+      </nav>
     </div>
   )
 }

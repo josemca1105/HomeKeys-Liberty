@@ -72,6 +72,11 @@
     background: color-mix(in srgb, var(--color-brand-cyan) 35%, white);
     color: var(--color-brand-950);
   }
+
+  input[type='search']::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
 }
 
 @layer utilities {

@@ -183,6 +183,21 @@ describe('flujo de autenticación', () => {
     expect(screen.queryByText('Datos de acceso')).not.toBeInTheDocument()
   })
 
+  it('impide abrir captaciones con un cambio de contraseña pendiente', async () => {
+    mockRestoredSession(createTestToken(), {
+      ...testUser,
+      mustChangePassword: true,
+    })
+
+    renderApp(['/captaciones'])
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Cambia tu contraseña para continuar',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('rechaza una sesión expirada antes de consultar la API', async () => {
     setAccessToken(createExpiredTestToken())
 

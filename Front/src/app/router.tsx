@@ -18,6 +18,16 @@ const DashboardPage = lazy(async () => {
   return { default: module.DashboardPage }
 })
 
+const PropertiesPage = lazy(async () => {
+  const module = await import('@/features/properties/pages/properties-page')
+  return { default: module.PropertiesPage }
+})
+
+const PropertyDetailPage = lazy(async () => {
+  const module = await import('@/features/properties/pages/property-detail-page')
+  return { default: module.PropertyDetailPage }
+})
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
@@ -28,6 +38,11 @@ export function AppRoutes() {
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/captaciones" element={<PropertiesPage />} />
+          <Route
+            path="/captaciones/:propertyId"
+            element={<PropertyDetailPage />}
+          />
         </Route>
 
         <Route path="/" element={<HomeRedirect />} />

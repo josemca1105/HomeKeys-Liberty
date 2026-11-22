@@ -9,7 +9,11 @@ Aplicación web privada para la gestión de captaciones inmobiliarias de HomeKey
 - Expiración automática según el token JWT.
 - Logout con revocación en el servidor y limpieza local.
 - Dashboard privado con datos reales del usuario.
-- Navegación limitada a `/login` y `/dashboard`.
+- Navegación privada de Inicio y Captaciones.
+- Listado de captaciones con búsqueda, filtros, orden y paginación.
+- Detalle de captación con galería, propietario, características y ubicación.
+- Fotografías privadas mediante peticiones autenticadas y Object URLs.
+- Tipos generados desde el contrato OpenAPI del backend.
 - Bloqueo visual cuando `mustChangePassword` está activo.
 - Diseño responsive con prioridad en Android e iPhone.
 - Áreas táctiles de al menos 48 px y soporte para safe areas.
@@ -88,8 +92,20 @@ Las variables `VITE_*` son públicas y quedan incluidas en el bundle. No deben c
 | --- | --- | --- |
 | `/login` | Pública | Inicio de sesión. Redirige al Dashboard si ya existe una sesión válida. |
 | `/dashboard` | Privada | Panel principal con la información del usuario autenticado. |
+| `/captaciones` | Privada | Inventario, búsqueda, filtros, orden y paginación. |
+| `/captaciones/:id` | Privada | Detalle, galería y datos de una captación accesible. |
 | `/` | Redirección | Lleva a Login o Dashboard según la sesión. |
 | Otras rutas | Redirección | Llevan al Login con aviso o al Dashboard si hay sesión. |
+
+## Captaciones
+
+- ADMIN consulta todas las captaciones y puede filtrar por agente.
+- PARTNER consulta únicamente las captaciones que el backend le autoriza.
+- Los filtros se conservan en la URL para mantener el estado al volver del detalle.
+- Las imágenes se descargan con Bearer token, se convierten en Object URLs y se revocan al desmontar.
+- Las imágenes de tarjetas se cargan al acercarse al viewport.
+- Los importes y áreas se reciben como strings Decimal y se formatean sin operar monetariamente con ellos.
+- La ubicación enlaza a OpenStreetMap externamente. MapLibre + OpenFreeMap se incorporará en una rama posterior.
 
 ## Comportamiento de sesión
 
@@ -115,7 +131,7 @@ Las variables `VITE_*` son públicas y quedan incluidas en el bundle. No deben c
 | `npm test` | Ejecuta las pruebas con Vitest. |
 | `npm run test:watch` | Ejecuta las pruebas en modo interactivo. |
 | `npm run test:coverage` | Genera el reporte de cobertura. |
-| `npm run generate:api` | Genera los tipos desde `../Back/openapi.yaml`. |
+| `npm run generate:api` | Genera `src/api/generated/schema.d.ts` desde `../Back/openapi.yaml`. |
 
 ## Estructura
 
@@ -128,12 +144,15 @@ src/
 ├── components/
 │   ├── brand/              # Componentes de marca
 │   ├── feedback/           # Estados de carga
+│   ├── images/             # Imágenes autenticadas con Bearer
 │   ├── layout/             # Shell de la aplicación autenticada
 │   └── ui/                 # Componentes compartidos
 ├── config/                 # Validación de variables de entorno
 ├── features/
 │   ├── auth/               # Login, sesión y protección de rutas
-│   └── dashboard/          # Panel principal
+│   ├── dashboard/          # Panel principal
+│   └── properties/         # Captaciones: API, filtros, listado y detalle
+├── hooks/                  # Hooks compartidos
 ├── lib/                    # Utilidades de JWT, clases y usuarios
 ├── test/                   # Setup, MSW, fixtures y helpers
 ├── App.tsx
@@ -158,3 +177,8 @@ Las pruebas cubren:
 - Pausa del contador mientras el aviso recibe interacción.
 - Cierre manual de advertencias.
 - Limpieza del error de credenciales al editar el formulario.
+- Interpretación, serialización y saneamiento de filtros de captaciones.
+- Listado de captaciones y envío de filtros a la API.
+- Alcance de PARTNER sin consultar el directorio de usuarios.
+- Detalle de captación y estado de no encontrada.
+- Descarga autenticada de fotografías y liberación de Object URLs.

@@ -1,4 +1,5 @@
 import type { AuthUser } from '@/features/auth/auth.types'
+import type { Property } from '@/features/properties/property.types'
 
 export const testUser: AuthUser = {
   id: 1,
@@ -12,6 +13,53 @@ export const testUser: AuthUser = {
   mustChangePassword: false,
   createdAt: '2026-11-22T12:00:00.000Z',
   updatedAt: '2026-11-22T12:00:00.000Z',
+}
+
+export const testProperty: Property = {
+  id: 1,
+  agentId: 1,
+  code: 'HK-0001',
+  title: 'Casa familiar en El Viñedo',
+  propertyType: 'HOUSE',
+  listingType: 'SALE',
+  status: 'ACTIVE',
+  description: 'Casa de dos niveles con patio y estacionamiento.',
+  ownerName: 'Carlos Pérez',
+  ownerPhone: '0414-1234567',
+  ownerEmail: 'carlos.perez@example.com',
+  address: 'Av. Principal, casa 12',
+  neighborhood: 'El Viñedo',
+  city: 'Valencia',
+  state: 'Carabobo',
+  latitude: 10.1234567,
+  longitude: -68.1234567,
+  price: '150000.00',
+  currency: 'USD',
+  maintenanceFee: '80.00',
+  isNegotiable: true,
+  bedrooms: 3,
+  bathrooms: 2,
+  parkingSpaces: 2,
+  squareMeters: '120.00',
+  lotSquareMeters: '200.00',
+  yearBuilt: 2010,
+  apartmentFloor: null,
+  hasWaterTank: true,
+  hasPowerPlant: false,
+  isFurnished: false,
+  allowsPets: true,
+  hasPool: false,
+  hasGym: false,
+  hasBalcony: true,
+  hasAirConditioning: true,
+  hasSecurity: true,
+  hasElevator: false,
+  videoUrl: null,
+  virtualTourUrl: null,
+  closedAt: null,
+  createdAt: '2026-11-22T12:00:00.000Z',
+  updatedAt: '2026-11-22T13:00:00.000Z',
+  photos: [],
 }
 
 export function createTestToken(expiresInSeconds = 3_600): string {
