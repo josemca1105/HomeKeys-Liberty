@@ -1,0 +1,113 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    'Source Sans 3 Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-display:
+    'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
+
+  --color-brand-950: #08273f;
+  --color-brand-900: #0b3454;
+  --color-brand-800: #0d466f;
+  --color-brand-700: #075b9e;
+  --color-brand-600: #0068b8;
+  --color-brand-cyan: #40c0e0;
+  --color-brand-cyan-ink: #08728a;
+  --color-brand-gold: #d0b040;
+  --color-brand-slate: #407080;
+  --color-surface: #f4f8f9;
+  --color-line: #d8e4e8;
+  --color-ink: #132630;
+  --color-ink-muted: #556b76;
+
+  --shadow-panel: 0 30px 80px -44px rgb(8 39 63 / 0.45);
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    min-width: 320px;
+    background-color: var(--color-surface);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-padding-bottom: 7rem;
+  }
+
+  body {
+    min-width: 320px;
+    margin: 0;
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  a,
+  button,
+  input,
+  label {
+    touch-action: manipulation;
+  }
+
+  #root {
+    min-height: 100dvh;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-brand-cyan) 75%, white);
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand-cyan) 35%, white);
+    color: var(--color-brand-950);
+  }
+}
+
+@layer utilities {
+  .auth-grid {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.055) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.055) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .app-grid {
+    background-image:
+      linear-gradient(to right, rgb(8 39 63 / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(8 39 63 / 0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .enter-rise {
+      animation: enter-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .enter-rise-late {
+      animation-delay: 100ms;
+    }
+  }
+}
+
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
