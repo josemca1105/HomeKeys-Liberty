@@ -9,7 +9,7 @@ import type {
 export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   HOUSE: 'Casa',
   APARTMENT: 'Apartamento',
-  TOWNHOUSE: 'Casa adosada',
+  TOWNHOUSE: 'Townhouse',
   LAND: 'Terreno',
   COMMERCIAL: 'Local comercial',
   OFFICE: 'Oficina',
