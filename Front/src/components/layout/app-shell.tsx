@@ -11,6 +11,8 @@ import { getUserInitials } from '@/lib/user'
 interface AppShellProps {
   children: ReactNode
   pageTitle?: string
+  showMobileNavigation?: boolean
+  onNavigateAttempt?: (to: string) => boolean
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -58,6 +60,8 @@ function UserAvatar({
 export function AppShell({
   children,
   pageTitle = 'Panel principal',
+  showMobileNavigation = true,
+  onNavigateAttempt,
 }: AppShellProps) {
   const { user, logout } = useAuth()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
@@ -67,6 +71,10 @@ export function AppShell({
   }
 
   const handleLogout = async () => {
+    if (onNavigateAttempt && !onNavigateAttempt('/login')) {
+      return
+    }
+
     setIsLoggingOut(true)
 
     try {
@@ -114,6 +122,11 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 end={item.end}
+                onClick={(event) => {
+                  if (onNavigateAttempt && !onNavigateAttempt(item.to)) {
+                    event.preventDefault()
+                  }
+                }}
                 className={({ isActive }) =>
                   cn(
                     'flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-semibold transition-colors',
@@ -200,41 +213,53 @@ export function AppShell({
 
         <main
           id="contenido"
-          className="app-grid flex-1 px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:px-9 lg:pb-10 lg:pt-10"
+          className={cn(
+            'app-grid flex-1 px-4 pt-6 sm:px-6 sm:pt-8 lg:px-9 lg:pt-10',
+            showMobileNavigation
+              ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-10'
+              : 'pb-6 lg:pb-10',
+          )}
         >
           {children}
         </main>
       </div>
 
-      <nav
-        aria-label="Navegación móvil"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
-      >
-        <div className="grid grid-cols-2 gap-1 py-1.5">
-          {navigationItems.map((item) => {
-            const Icon = item.icon
+      {showMobileNavigation ? (
+        <nav
+          aria-label="Navegación móvil"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+        >
+          <div className="grid grid-cols-2 gap-1 py-1.5">
+            {navigationItems.map((item) => {
+              const Icon = item.icon
 
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    'flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors',
-                    isActive
-                      ? 'bg-brand-700/[0.08] text-brand-800'
-                      : 'text-ink-muted hover:bg-surface hover:text-brand-900',
-                  )
-                }
-              >
-                <Icon aria-hidden="true" className="size-5" />
-                {item.label}
-              </NavLink>
-            )
-          })}
-        </div>
-      </nav>
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  onClick={(event) => {
+                    if (onNavigateAttempt && !onNavigateAttempt(item.to)) {
+                      event.preventDefault()
+                    }
+                  }}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors',
+                      isActive
+                        ? 'bg-brand-700/[0.08] text-brand-800'
+                        : 'text-ink-muted hover:bg-surface hover:text-brand-900',
+                    )
+                  }
+                >
+                  <Icon aria-hidden="true" className="size-5" />
+                  {item.label}
+                </NavLink>
+              )
+            })}
+          </div>
+        </nav>
+      ) : null}
     </div>
   )
 }
