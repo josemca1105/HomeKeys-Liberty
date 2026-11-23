@@ -88,20 +88,7 @@ const optionalNumber = (
       )
     }, message)
 
-const optionalAgentIdSchema = z
-  .string()
-  .trim()
-  .refine((value) => {
-    if (!value) {
-      return true
-    }
-
-    const agentId = Number(value)
-    return Number.isInteger(agentId) && agentId >= 1
-  }, 'Selecciona un agente válido.')
-
 export const createPropertySchema = z.object({
-  agentId: optionalAgentIdSchema,
   title: requiredText('el título', 200),
   propertyType: z.enum(['HOUSE', 'APARTMENT', 'TOWNHOUSE', 'LAND', 'COMMERCIAL', 'OFFICE', 'WAREHOUSE', 'FARM'], {
     message: 'Selecciona el tipo de propiedad.',
@@ -179,7 +166,6 @@ export const createPropertySchema = z.object({
 export type CreatePropertyFormValues = z.infer<typeof createPropertySchema>
 
 export const CREATE_PROPERTY_DEFAULT_VALUES: CreatePropertyFormValues = {
-  agentId: '',
   title: '',
   propertyType: 'HOUSE',
   listingType: 'SALE',
@@ -221,7 +207,6 @@ export const CREATE_PROPERTY_STEP_FIELDS: ReadonlyArray<
   ReadonlyArray<keyof CreatePropertyFormValues>
 > = [
   [
-    'agentId',
     'title',
     'propertyType',
     'listingType',
@@ -277,20 +262,11 @@ const toNullableText = (value: string): string | null =>
 export function toCreatePropertyRequest(
   values: CreatePropertyFormValues,
   options: {
-    currentUserId: number
-    isAdmin: boolean
     photoBatchId: string
     coverUploadId?: string
   },
 ): CreatePropertyRequest {
   return {
-    ...(options.isAdmin
-      ? {
-          agentId: values.agentId
-            ? Number(values.agentId)
-            : options.currentUserId,
-        }
-      : {}),
     photoBatchId: options.photoBatchId,
     ...(options.coverUploadId
       ? { coverUploadId: options.coverUploadId }

@@ -1,11 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   FormProvider,
   useForm,
-  useWatch,
   type FieldErrors,
 } from 'react-hook-form'
 import { useNavigate } from 'react-router'
@@ -14,11 +13,7 @@ import { AppShell } from '@/components/layout/app-shell'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
 import { useAuth } from '@/features/auth/auth-context'
-import {
-  propertyQueryKeys,
-  useAgentDirectoryQuery,
-} from '../../property-queries'
-import type { AgentDirectoryEntry } from '../../property.types'
+import { propertyQueryKeys } from '../../property-queries'
 import { StepFeatures } from '../components/step-features'
 import { StepLocationOwner } from '../components/step-location-owner'
 import { StepMainInfo } from '../components/step-main-info'
@@ -49,38 +44,18 @@ export function CreatePropertyPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user } = useAuth()
-  const isAdmin = user?.role === 'ADMIN'
-  const agentDirectoryQuery = useAgentDirectoryQuery(isAdmin)
+  const agentName = user
+    ? `${user.firstName} ${user.lastName}`
+    : 'Agente no disponible'
   const photoUpload = usePhotoUpload()
   const [step, setStep] = useState(1)
   const [photoStepError, setPhotoStepError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const agents = useMemo<AgentDirectoryEntry[]>(() => {
-    const directory = agentDirectoryQuery.data ?? []
-
-    if (!user || directory.some((agent) => agent.id === user.id)) {
-      return directory
-    }
-
-    return [
-      {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-      },
-      ...directory,
-    ]
-  }, [agentDirectoryQuery.data, user])
-
   const form = useForm<CreatePropertyFormValues>({
     resolver: zodResolver(createPropertySchema),
     mode: 'onTouched',
-    defaultValues: {
-      ...CREATE_PROPERTY_DEFAULT_VALUES,
-      agentId: user ? String(user.id) : '',
-    },
+    defaultValues: { ...CREATE_PROPERTY_DEFAULT_VALUES },
   })
 
   const {
@@ -90,18 +65,6 @@ export function CreatePropertyPage() {
     formState: { isDirty },
   } = form
 
-  const selectedAgentValue = useWatch({
-    control: form.control,
-    name: 'agentId',
-  })
-  const selectedAgentId = Number(selectedAgentValue) || user?.id || 0
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId)
-  const agentName = selectedAgent
-    ? `${selectedAgent.firstName} ${selectedAgent.lastName}`
-    : user
-      ? `${user.firstName} ${user.lastName}`
-      : 'Agente no disponible'
-
   const createMutation = useMutation({
     mutationFn: async (values: CreatePropertyFormValues) => {
       if (!photoUpload.batch) {
@@ -110,8 +73,6 @@ export function CreatePropertyPage() {
 
       return createProperty(
         toCreatePropertyRequest(values, {
-          currentUserId: user?.id ?? 0,
-          isAdmin,
           photoBatchId: photoUpload.batch.id,
           ...(photoUpload.coverUploadId
             ? { coverUploadId: photoUpload.coverUploadId }
@@ -336,13 +297,7 @@ export function CreatePropertyPage() {
           ) : null}
 
           <div className="mt-6">
-            {step === 1 ? (
-              <StepMainInfo
-                agents={agents}
-                isAdmin={isAdmin}
-                isLoadingAgents={isAdmin && agentDirectoryQuery.isPending}
-              />
-            ) : null}
+            {step === 1 ? <StepMainInfo /> : null}
             {step === 2 ? <StepLocationOwner /> : null}
             {step === 3 ? <StepFeatures /> : null}
             {step === 4 ? (

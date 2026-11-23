@@ -148,8 +148,6 @@ describe('createProperty', () => {
       squareMeters: '120',
     }
     const payload = toCreatePropertyRequest(values, {
-      currentUserId: 1,
-      isAdmin: true,
       photoBatchId: 'batch-1',
       coverUploadId: 'upload-3',
     })
@@ -163,5 +161,6 @@ describe('createProperty', () => {
       title: 'Casa nueva',
       price: 150000,
     })
+    expect(captured).not.toHaveProperty('agentId')
   })
 })

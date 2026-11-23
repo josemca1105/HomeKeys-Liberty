@@ -127,10 +127,8 @@ describe('createPropertySchema', () => {
 })
 
 describe('toCreatePropertyRequest', () => {
-  it('convierte los valores y omite agentId para un PARTNER', () => {
+  it('convierte los valores y no envía agentId', () => {
     const payload = toCreatePropertyRequest(validValues, {
-      currentUserId: 4,
-      isAdmin: false,
       photoBatchId: 'batch-1',
       coverUploadId: 'upload-2',
     })
@@ -154,33 +152,6 @@ describe('toCreatePropertyRequest', () => {
     expect(payload).not.toHaveProperty('agentId')
   })
 
-  it('asigna el agente indicado por un ADMIN', () => {
-    const payload = toCreatePropertyRequest(
-      { ...validValues, agentId: '7' },
-      {
-        currentUserId: 1,
-        isAdmin: true,
-        photoBatchId: 'batch-1',
-      },
-    )
-
-    expect(payload.agentId).toBe(7)
-    expect(payload).not.toHaveProperty('coverUploadId')
-  })
-
-  it('usa al administrador actual cuando no se indica agente', () => {
-    const payload = toCreatePropertyRequest(
-      { ...validValues, agentId: '' },
-      {
-        currentUserId: 9,
-        isAdmin: true,
-        photoBatchId: 'batch-1',
-      },
-    )
-
-    expect(payload.agentId).toBe(9)
-  })
-
   it('convierte los opcionales vacíos en null', () => {
     const payload = toCreatePropertyRequest(
       {
@@ -196,8 +167,6 @@ describe('toCreatePropertyRequest', () => {
         virtualTourUrl: '',
       },
       {
-        currentUserId: 1,
-        isAdmin: false,
         photoBatchId: 'batch-1',
       },
     )

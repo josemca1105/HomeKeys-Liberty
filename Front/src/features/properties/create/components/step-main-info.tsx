@@ -7,7 +7,6 @@ import {
   LISTING_TYPES,
   PROPERTY_TYPES,
 } from '../../property-filters'
-import type { AgentDirectoryEntry } from '../../property.types'
 import type { CreatePropertyFormValues } from '../create-property.schema'
 import {
   CheckboxField,
@@ -16,31 +15,16 @@ import {
   TextareaField,
 } from './form-controls'
 
-interface StepMainInfoProps {
-  agents: AgentDirectoryEntry[]
-  isAdmin: boolean
-  isLoadingAgents: boolean
-}
-
 const listingDescriptions = {
   SALE: 'Precio total de venta en USD.',
   RENT: 'Precio mensual de alquiler en USD.',
 } as const
 
-export function StepMainInfo({
-  agents,
-  isAdmin,
-  isLoadingAgents,
-}: StepMainInfoProps) {
+export function StepMainInfo() {
   const {
     register,
     formState: { errors },
   } = useFormContext<CreatePropertyFormValues>()
-
-  const agentOptions = agents.map((agent) => ({
-    value: String(agent.id),
-    label: `${agent.firstName} ${agent.lastName}`,
-  }))
 
   const listingTypeError = errors.listingType?.message
 
@@ -55,19 +39,6 @@ export function StepMainInfo({
         </p>
 
         <div className="mt-5 space-y-5">
-          {isAdmin ? (
-            <SelectField
-              name="agentId"
-              label="Agente asignado"
-              options={agentOptions}
-              hint={
-                isLoadingAgents
-                  ? 'Cargando agentes activos…'
-                  : 'Puedes asignar la captación a cualquier agente activo.'
-              }
-            />
-          ) : null}
-
           <TextField
             name="title"
             label="Título"

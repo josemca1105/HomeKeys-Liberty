@@ -318,13 +318,15 @@ describe('creación de captaciones', () => {
     const actor = userEvent.setup()
 
     mockAuthenticatedSession()
-    mockAgentDirectory()
 
     renderApp(['/captaciones/nueva'])
 
     expect(
       await screen.findByRole('heading', { name: 'Nueva captación' }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByLabelText(/Agente asignado/),
+    ).not.toBeInTheDocument()
 
     await actor.click(screen.getByRole('button', { name: 'Continuar' }))
 
@@ -351,7 +353,6 @@ describe('creación de captaciones', () => {
     const actor = userEvent.setup()
 
     mockAuthenticatedSession()
-    mockAgentDirectory()
     mockPhotoPipeline()
 
     renderApp(['/captaciones/nueva'])
@@ -443,8 +444,8 @@ describe('creación de captaciones', () => {
       bathrooms: 2,
       parkingSpaces: 1,
       squareMeters: 95,
-      agentId: testUser.id,
     })
+    expect(createPayload).not.toHaveProperty('agentId')
 
     expect(
       await screen.findByRole('heading', { name: testProperty.title }),
