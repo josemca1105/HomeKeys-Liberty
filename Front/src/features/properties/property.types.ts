@@ -6,6 +6,10 @@ export type PropertyStatus = components['schemas']['PropertyStatus']
 export type PropertyType = components['schemas']['PropertyType']
 export type ListingType = components['schemas']['ListingType']
 export type Pagination = components['schemas']['Pagination']
+export type CreatePropertyRequest = components['schemas']['CreatePropertyRequest']
+export type PropertyPhotoBatch = components['schemas']['PropertyPhotoBatch']
+export type PropertyPhotoUpload = components['schemas']['PropertyPhotoUpload']
+export type PhotoUploadTarget = components['schemas']['PhotoUploadTarget']
 
 export type PropertySortBy = 'createdAt' | 'updatedAt' | 'price' | 'title'
 export type SortOrder = 'asc' | 'desc'

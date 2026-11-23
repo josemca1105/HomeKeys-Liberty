@@ -1,15 +1,18 @@
 import {
   Building2,
   FilterX,
+  Plus,
   RefreshCw,
   SearchX,
 } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { normalizeApiError } from '@/api/errors'
 import { AppShell } from '@/components/layout/app-shell'
 import { Button } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button-variants'
 import { useAuth } from '@/features/auth/auth-context'
+import { cn } from '@/lib/cn'
 import { PropertyCard } from '../components/property-card'
 import { PropertyCardSkeleton } from '../components/property-card-skeleton'
 import { PropertyFiltersDialog } from '../components/property-filters-dialog'
@@ -167,6 +170,14 @@ export function PropertiesPage() {
                 : 'Consulta las captaciones que tienes asignadas y encuentra cada propiedad rápidamente.'}
             </p>
           </div>
+
+          <Link
+            to="/captaciones/nueva"
+            className={cn(buttonVariants(), 'w-full shrink-0 sm:w-auto')}
+          >
+            <Plus aria-hidden="true" className="size-4" />
+            Nueva captación
+          </Link>
         </header>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -321,7 +332,15 @@ export function PropertiesPage() {
                     >
                       Limpiar filtros
                     </Button>
-                  ) : null}
+                  ) : (
+                    <Link
+                      to="/captaciones/nueva"
+                      className={cn(buttonVariants(), 'mt-5')}
+                    >
+                      <Plus aria-hidden="true" className="size-4" />
+                      Nueva captación
+                    </Link>
+                  )}
                 </div>
               ) : null}
 
