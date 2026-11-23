@@ -98,6 +98,8 @@ function mockEmptyPropertyList() {
 }
 
 function mockPhotoPipeline() {
+  let uploadSequence = 0
+
   server.use(
     http.post(
       batchesUrl,
@@ -128,6 +130,8 @@ function mockPhotoPipeline() {
           sizeBytes: number
         }
 
+        uploadSequence += 1
+
         return HttpResponse.json(
           {
             success: true,
@@ -141,7 +145,7 @@ function mockPhotoPipeline() {
                   'X-Photo-Upload-Token': 'signed-token',
                 },
                 expiresAt: futureIso(),
-                storageKey: `property-photos/pending/${crypto.randomUUID()}.jpg`,
+                storageKey: `property-photos/pending/foto-${uploadSequence}.jpg`,
               },
             },
           },

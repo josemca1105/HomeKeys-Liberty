@@ -53,8 +53,18 @@ export interface PhotoUploadController {
   clearGlobalError: () => void
 }
 
-function createLocalId(): string {
-  return crypto.randomUUID()
+let localPhotoSequence = 0
+
+export function createPhotoLocalId(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID()
+  }
+
+  localPhotoSequence += 1
+  return `photo-${Date.now().toString(36)}-${localPhotoSequence}`
 }
 
 export function usePhotoUpload(): PhotoUploadController {
@@ -198,18 +208,32 @@ export function usePhotoUpload(): PhotoUploadController {
         return
       }
 
-      const newPhotos: PendingPhoto[] = selection.validFiles.map((file) => {
-        const previewUrl = URL.createObjectURL(file)
-        previewUrlsRef.current.add(previewUrl)
+      const newPhotos: PendingPhoto[] = []
 
-        return {
-          localId: createLocalId(),
-          file,
-          previewUrl,
-          status: 'queued',
-          progress: 0,
+      try {
+        for (const file of selection.validFiles) {
+          const localId = createPhotoLocalId()
+          const previewUrl = URL.createObjectURL(file)
+          previewUrlsRef.current.add(previewUrl)
+
+          newPhotos.push({
+            localId,
+            file,
+            previewUrl,
+            status: 'queued',
+            progress: 0,
+          })
         }
-      })
+      } catch {
+        for (const photo of newPhotos) {
+          revokePreview(photo.previewUrl)
+        }
+
+        setGlobalError(
+          'No se pudieron preparar las fotografías seleccionadas. Intenta nuevamente.',
+        )
+        return
+      }
 
       setPhotos((current) => [...current, ...newPhotos])
       isBusyRef.current = true
@@ -269,7 +293,7 @@ export function usePhotoUpload(): PhotoUploadController {
         }
       }
     },
-    [uploadSingle],
+    [revokePreview, uploadSingle],
   )
 
   const retryPhoto = useCallback(
