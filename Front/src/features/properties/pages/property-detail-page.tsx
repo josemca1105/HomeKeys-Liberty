@@ -9,21 +9,30 @@ import {
   Hash,
   Home,
   LandPlot,
+  Lock,
   Mail,
   MapPin,
+  Pause,
+  Pencil,
   Phone,
+  Play,
   RefreshCw,
+  RotateCcw,
   Ruler,
   ShieldCheck,
+  Trash2,
   UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { normalizeApiError } from '@/api/errors'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuthenticatedImage } from '@/components/images/authenticated-image'
 import { Button } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button-variants'
+import { Notice } from '@/components/ui/notice'
 import { useAuth } from '@/features/auth/auth-context'
+import type { AuthNotice } from '@/features/auth/auth.types'
 import { cn } from '@/lib/cn'
 import {
   AMENITIES,
@@ -35,6 +44,7 @@ import {
   getOpenStreetMapUrl,
   getPropertyLocation,
   LISTING_TYPE_LABELS,
+  PROPERTY_STATUS_LABELS,
   PROPERTY_TYPE_LABELS,
 } from '../property-labels'
 import {
@@ -42,7 +52,11 @@ import {
   useAgentDirectoryQuery,
   usePropertyQuery,
 } from '../property-queries'
-import type { Property } from '../property.types'
+import {
+  useDeletePropertyMutation,
+  useUpdatePropertyMutation,
+} from '../property-mutations'
+import type { Property, PropertyStatus } from '../property.types'
 import { PropertyStatusBadge } from '../components/property-status-badge'
 import { PropertyLocationMap } from '../map/property-location-map'
 
@@ -202,14 +216,42 @@ function PropertyGallery({ property }: { property: Property }) {
 
 export function PropertyDetailPage() {
   const { propertyId: propertyIdParam } = useParams()
+  const navigate = useNavigate()
+  const routeLocation = useLocation()
   const { user } = useAuth()
+  const updateMutation = useUpdatePropertyMutation()
+  const deleteMutation = useDeletePropertyMutation()
+  const locationState = routeLocation.state as {
+    created?: boolean
+    updated?: boolean
+  } | null
+  const [actionNotice, setActionNotice] = useState<AuthNotice | null>(
+    () => {
+      if (locationState?.updated) {
+        return {
+          tone: 'success',
+          message: 'Cambios guardados correctamente.',
+        }
+      }
+
+      if (locationState?.created) {
+        return {
+          tone: 'success',
+          message: 'Captación creada correctamente.',
+        }
+      }
+
+      return null
+    },
+  )
+  const isAdmin = user?.role === 'ADMIN'
   const parsedPropertyId = Number(propertyIdParam)
   const propertyId =
     Number.isInteger(parsedPropertyId) && parsedPropertyId > 0
       ? parsedPropertyId
       : null
   const propertyQuery = usePropertyQuery(propertyId)
-  const agentsQuery = useAgentDirectoryQuery(user?.role === 'ADMIN')
+  const agentsQuery = useAgentDirectoryQuery(isAdmin)
   const agentDirectory = useMemo(
     () => toAgentDirectory(agentsQuery.data),
     [agentsQuery.data],
@@ -273,6 +315,104 @@ export function PropertyDetailPage() {
     return null
   }
 
+  const canEdit = isAdmin || property.status !== 'CLOSED'
+  const statusActions: Array<{
+    status: PropertyStatus
+    label: string
+    confirmMessage: string
+    icon: typeof Pause
+  }> = []
+
+  if (property.status === 'ACTIVE') {
+    statusActions.push({
+      status: 'PAUSED',
+      label: 'Pausar captación',
+      confirmMessage:
+        'La captación dejará de mostrarse como activa. ¿Deseas pausarla?',
+      icon: Pause,
+    })
+    statusActions.push({
+      status: 'CLOSED',
+      label: 'Cerrar captación',
+      confirmMessage:
+        'La captación se marcará como cerrada. Un partner no podrá editarla hasta que un administrador la reabra. ¿Deseas cerrarla?',
+      icon: Lock,
+    })
+  } else if (property.status === 'PAUSED') {
+    statusActions.push({
+      status: 'ACTIVE',
+      label: 'Reactivar captación',
+      confirmMessage:
+        'La captación volverá a estar activa. ¿Deseas reactivarla?',
+      icon: Play,
+    })
+    statusActions.push({
+      status: 'CLOSED',
+      label: 'Cerrar captación',
+      confirmMessage:
+        'La captación se marcará como cerrada. Un partner no podrá editarla hasta que un administrador la reabra. ¿Deseas cerrarla?',
+      icon: Lock,
+    })
+  } else if (isAdmin) {
+    statusActions.push({
+      status: 'ACTIVE',
+      label: 'Reabrir captación',
+      confirmMessage:
+        'La captación volverá a estar activa y editable. ¿Deseas reabrirla?',
+      icon: RotateCcw,
+    })
+  }
+
+  const handleStatusChange = async (
+    status: PropertyStatus,
+    confirmMessage: string,
+  ) => {
+    if (!window.confirm(confirmMessage)) {
+      return
+    }
+
+    setActionNotice(null)
+
+    try {
+      const updated = await updateMutation.mutateAsync({
+        propertyId: property.id,
+        input: { status },
+      })
+
+      setActionNotice({
+        tone: 'success',
+        message: `Estado actualizado a ${PROPERTY_STATUS_LABELS[updated.status]}.`,
+      })
+    } catch (error) {
+      setActionNotice({
+        tone: 'error',
+        message: normalizeApiError(error).message,
+      })
+    }
+  }
+
+  const handleDelete = async () => {
+    if (
+      !window.confirm(
+        `Se eliminará la captación ${property.code} — ${property.title}. Esta acción no se puede deshacer. ¿Deseas continuar?`,
+      )
+    ) {
+      return
+    }
+
+    setActionNotice(null)
+
+    try {
+      await deleteMutation.mutateAsync(property.id)
+      navigate('/captaciones', { replace: true })
+    } catch (error) {
+      setActionNotice({
+        tone: 'error',
+        message: normalizeApiError(error).message,
+      })
+    }
+  }
+
   const currentUserName = `${user.firstName} ${user.lastName}`
   const agentName = getAgentDisplayName(
     property.agentId,
@@ -296,6 +436,14 @@ export function PropertyDetailPage() {
           <ArrowLeft aria-hidden="true" className="size-4" />
           Volver a captaciones
         </Link>
+
+        {actionNotice ? (
+          <Notice
+            notice={actionNotice}
+            className="mt-4"
+            onDismiss={() => setActionNotice(null)}
+          />
+        ) : null}
 
         <header className="mt-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -462,6 +610,74 @@ export function PropertyDetailPage() {
           </div>
 
           <aside className="order-1 space-y-5 lg:order-2">
+            <section className="rounded-2xl border border-line bg-white p-5">
+              <h2 className="font-display text-base font-semibold text-brand-950">
+                Acciones
+              </h2>
+
+              <div className="mt-4 space-y-2">
+                {canEdit ? (
+                  <Link
+                    to={`/captaciones/${property.id}/editar`}
+                    className={cn(buttonVariants(), 'w-full')}
+                  >
+                    <Pencil aria-hidden="true" className="size-4" />
+                    Editar captación
+                  </Link>
+                ) : null}
+
+                {statusActions.map((action) => {
+                  const Icon = action.icon
+
+                  return (
+                    <Button
+                      key={action.status}
+                      type="button"
+                      variant="secondary"
+                      className="w-full justify-start"
+                      disabled={updateMutation.isPending}
+                      onClick={() =>
+                        void handleStatusChange(
+                          action.status,
+                          action.confirmMessage,
+                        )
+                      }
+                    >
+                      <Icon aria-hidden="true" className="size-4" />
+                      {action.label}
+                    </Button>
+                  )
+                })}
+
+                {!canEdit && statusActions.length === 0 ? (
+                  <p className="rounded-xl bg-surface px-3 py-3 text-sm leading-6 text-ink-muted">
+                    Esta captación está cerrada. Un administrador debe
+                    reabrirla para editarla.
+                  </p>
+                ) : null}
+              </div>
+
+              {isAdmin ? (
+                <div className="mt-4 border-t border-line/70 pt-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full justify-start border-[#e7b2ae] text-[#842e28] hover:bg-[#fff7f6]"
+                    isLoading={deleteMutation.isPending}
+                    loadingLabel="Eliminando…"
+                    onClick={() => void handleDelete()}
+                  >
+                    <Trash2 aria-hidden="true" className="size-4" />
+                    Eliminar captación
+                  </Button>
+                  <p className="mt-2 text-xs leading-5 text-ink-muted">
+                    La captación se ocultará y no podrá recuperarse desde la
+                    interfaz.
+                  </p>
+                </div>
+              ) : null}
+            </section>
+
             <section className="rounded-2xl border border-line bg-white p-5 shadow-[0_18px_45px_-38px_rgb(8_39_63/0.5)] lg:sticky lg:top-24">
               <p className="text-sm font-semibold text-brand-slate">
                 Precio de {LISTING_TYPE_LABELS[property.listingType].toLowerCase()}

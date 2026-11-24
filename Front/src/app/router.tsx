@@ -35,6 +35,13 @@ const CreatePropertyPage = lazy(async () => {
   return { default: module.CreatePropertyPage }
 })
 
+const EditPropertyPage = lazy(async () => {
+  const module = await import(
+    '@/features/properties/edit/pages/edit-property-page'
+  )
+  return { default: module.EditPropertyPage }
+})
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
@@ -50,6 +57,10 @@ export function AppRoutes() {
           <Route
             path="/captaciones/:propertyId"
             element={<PropertyDetailPage />}
+          />
+          <Route
+            path="/captaciones/:propertyId/editar"
+            element={<EditPropertyPage />}
           />
         </Route>
 

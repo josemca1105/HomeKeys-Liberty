@@ -1,9 +1,15 @@
 import { apiClient } from '@/api/client'
 import type { components, paths } from '@/api/generated/schema'
-import type { PropertyFilters, PropertyListData, Property } from './property.types'
+import type {
+  PropertyFilters,
+  PropertyListData,
+  Property,
+  UpdatePropertyRequest,
+} from './property.types'
 
 type PropertyListResponse = components['schemas']['PropertyListResponse']
 type PropertyResponse = components['schemas']['PropertyResponse']
+type DeletePropertyResponse = components['schemas']['DeletePropertyResponse']
 type UserListResponse = components['schemas']['UserListResponse']
 type PropertyListRequestParams = NonNullable<
   paths['/api/v1/properties']['get']['parameters']['query']
@@ -64,6 +70,28 @@ export async function fetchProperty(
   )
 
   return response.data.data.property
+}
+
+export async function updateProperty(
+  propertyId: number,
+  input: UpdatePropertyRequest,
+): Promise<Property> {
+  const response = await apiClient.patch<PropertyResponse>(
+    `/properties/${propertyId}`,
+    input,
+  )
+
+  return response.data.data.property
+}
+
+export async function deleteProperty(
+  propertyId: number,
+): Promise<number> {
+  const response = await apiClient.delete<DeletePropertyResponse>(
+    `/properties/${propertyId}`,
+  )
+
+  return response.data.data.deletedId
 }
 
 export async function fetchAgentDirectory(
