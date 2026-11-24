@@ -1,5 +1,8 @@
 import type { AuthUser } from '@/features/auth/auth.types'
-import type { Property } from '@/features/properties/property.types'
+import type {
+  Property,
+  PropertyPhoto,
+} from '@/features/properties/property.types'
 
 export const testUser: AuthUser = {
   id: 1,
@@ -62,8 +65,23 @@ export const testProperty: Property = {
   photos: [],
 }
 
-export function createTestToken(expiresInSeconds = 3_600): string {
-  const payload = {
+export function createTestPhotos(count = 5): PropertyPhoto[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    url: `/api/v1/properties/1/photos/${index + 1}/content`,
+    mimeType: 'image/webp',
+    sizeBytes: 1_024,
+    width: 1_200,
+    height: 900,
+    altText: `Foto ${index + 1}`,
+    sortOrder: index,
+    isCover: index === 0,
+    createdAt: '2026-11-22T12:00:00.000Z',
+    updatedAt: '2026-11-22T12:00:00.000Z',
+  }))
+}
+
+export function createTestToken(expiresInSeconds = 3_600): string {  const payload = {
     sub: '1',
     role: 'ADMIN',
     exp: Math.floor(Date.now() / 1000) + expiresInSeconds,

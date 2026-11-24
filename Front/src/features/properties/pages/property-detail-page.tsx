@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Hash,
   Home,
+  Images,
   LandPlot,
   Lock,
   Mail,
@@ -623,6 +624,19 @@ export function PropertyDetailPage() {
                   >
                     <Pencil aria-hidden="true" className="size-4" />
                     Editar captación
+                  </Link>
+                ) : null}
+
+                {canEdit ? (
+                  <Link
+                    to={`/captaciones/${property.id}/fotos`}
+                    className={cn(
+                      buttonVariants({ variant: 'secondary' }),
+                      'w-full',
+                    )}
+                  >
+                    <Images aria-hidden="true" className="size-4" />
+                    Gestionar fotos
                   </Link>
                 ) : null}
 
