@@ -259,18 +259,10 @@ const toNullableNumber = (value: string): number | null =>
 const toNullableText = (value: string): string | null =>
   value.trim() ? value.trim() : null
 
-export function toCreatePropertyRequest(
+export function toPropertyRequestFields(
   values: CreatePropertyFormValues,
-  options: {
-    photoBatchId: string
-    coverUploadId?: string
-  },
-): CreatePropertyRequest {
+) {
   return {
-    photoBatchId: options.photoBatchId,
-    ...(options.coverUploadId
-      ? { coverUploadId: options.coverUploadId }
-      : {}),
     title: values.title.trim(),
     propertyType: values.propertyType as PropertyType,
     listingType: values.listingType as ListingType,
@@ -306,5 +298,21 @@ export function toCreatePropertyRequest(
     hasElevator: values.hasElevator,
     videoUrl: toNullableText(values.videoUrl),
     virtualTourUrl: toNullableText(values.virtualTourUrl),
+  }
+}
+
+export function toCreatePropertyRequest(
+  values: CreatePropertyFormValues,
+  options: {
+    photoBatchId: string
+    coverUploadId?: string
+  },
+): CreatePropertyRequest {
+  return {
+    photoBatchId: options.photoBatchId,
+    ...(options.coverUploadId
+      ? { coverUploadId: options.coverUploadId }
+      : {}),
+    ...toPropertyRequestFields(values),
   }
 }
