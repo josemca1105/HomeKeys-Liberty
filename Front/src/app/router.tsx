@@ -42,6 +42,13 @@ const EditPropertyPage = lazy(async () => {
   return { default: module.EditPropertyPage }
 })
 
+const PropertyPhotosPage = lazy(async () => {
+  const module = await import(
+    '@/features/properties/photos/pages/property-photos-page'
+  )
+  return { default: module.PropertyPhotosPage }
+})
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
@@ -61,6 +68,10 @@ export function AppRoutes() {
           <Route
             path="/captaciones/:propertyId/editar"
             element={<EditPropertyPage />}
+          />
+          <Route
+            path="/captaciones/:propertyId/fotos"
+            element={<PropertyPhotosPage />}
           />
         </Route>
 
