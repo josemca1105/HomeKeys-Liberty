@@ -1,4 +1,10 @@
-import { Building2, LayoutDashboard, LogOut, UserRound } from 'lucide-react'
+import {
+  Building2,
+  LayoutDashboard,
+  LogOut,
+  UserRound,
+  UsersRound,
+} from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 import { BrandLogo } from '@/components/brand/brand-logo'
@@ -35,6 +41,13 @@ const navigationItems = [
   },
 ] as const
 
+const adminNavigationItem = {
+  to: '/usuarios',
+  label: 'Usuarios',
+  icon: UsersRound,
+  end: false,
+} as const
+
 function UserAvatar({
   firstName,
   lastName,
@@ -69,6 +82,11 @@ export function AppShell({
   if (!user) {
     return null
   }
+
+  const visibleNavigationItems =
+    user.role === 'ADMIN'
+      ? [...navigationItems, adminNavigationItem]
+      : [...navigationItems]
 
   const handleLogout = async () => {
     if (onNavigateAttempt && !onNavigateAttempt('/login')) {
@@ -114,7 +132,7 @@ export function AppShell({
           aria-label="Navegación principal"
           className="relative mt-10 space-y-1.5"
         >
-          {navigationItems.map((item) => {
+          {visibleNavigationItems.map((item) => {
             const Icon = item.icon
 
             return (
@@ -238,8 +256,15 @@ export function AppShell({
           aria-label="Navegación móvil"
           className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
         >
-          <div className="grid grid-cols-2 gap-1 py-1.5">
-            {navigationItems.map((item) => {
+          <div
+            className={cn(
+              'grid gap-1 py-1.5',
+              visibleNavigationItems.length >= 3
+                ? 'grid-cols-3'
+                : 'grid-cols-2',
+            )}
+          >
+            {visibleNavigationItems.map((item) => {
               const Icon = item.icon
 
               return (
