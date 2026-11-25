@@ -85,6 +85,11 @@ const UserDetailPage = lazy(async () => {
   return { default: module.UserDetailPage }
 })
 
+const AuditPage = lazy(async () => {
+  const module = await import('@/features/audit/pages/audit-page')
+  return { default: module.AuditPage }
+})
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
@@ -128,6 +133,7 @@ export function AppRoutes() {
             <Route path="/usuarios/nuevo" element={<UserInvitePage />} />
             <Route path="/usuarios/:userId" element={<UserDetailPage />} />
           </Route>
+          <Route path="/auditoria" element={<AuditPage />} />
         </Route>
 
         <Route path="/" element={<HomeRedirect />} />
