@@ -159,6 +159,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [endLocalSession])
 
+  const updateUser = useCallback((user: AuthUser) => {
+    setState((current) =>
+      current.status === 'authenticated'
+        ? { ...current, user }
+        : current,
+    )
+  }, [])
+
+  const endSession = useCallback(
+    (notice: AuthNotice) => {
+      endLocalSession(notice)
+    },
+    [endLocalSession],
+  )
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status: state.status,
@@ -166,8 +181,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       notice: state.notice,
       login,
       logout,
+      updateUser,
+      endSession,
     }),
-    [login, logout, state.notice, state.status, state.user],
+    [
+      endSession,
+      login,
+      logout,
+      state.notice,
+      state.status,
+      state.user,
+      updateUser,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

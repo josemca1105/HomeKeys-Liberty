@@ -177,8 +177,13 @@ describe('flujo de autenticación', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Cambia tu contraseña para continuar',
+        name: 'Cambia tu contraseña',
       }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Debes completar este paso para acceder al resto del panel.',
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByText('Datos de acceso')).not.toBeInTheDocument()
   })
@@ -193,7 +198,7 @@ describe('flujo de autenticación', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Cambia tu contraseña para continuar',
+        name: 'Cambia tu contraseña',
       }),
     ).toBeInTheDocument()
   })

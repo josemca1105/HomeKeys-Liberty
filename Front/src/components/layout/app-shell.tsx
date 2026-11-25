@@ -1,6 +1,6 @@
-import { Building2, LayoutDashboard, LogOut } from 'lucide-react'
+import { Building2, LayoutDashboard, LogOut, UserRound } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { NavLink } from 'react-router'
+import { Link, NavLink } from 'react-router'
 import { BrandLogo } from '@/components/brand/brand-logo'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/auth-context'
@@ -183,6 +183,15 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              to="/perfil"
+              aria-label="Mi perfil"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-brand-700 hover:bg-surface hover:text-brand-900"
+            >
+              <UserRound aria-hidden="true" className="size-4" />
+              <span className="hidden sm:inline">Mi perfil</span>
+            </Link>
+
             <div className="hidden items-center gap-2.5 sm:flex">
               <UserAvatar
                 firstName={user.firstName}

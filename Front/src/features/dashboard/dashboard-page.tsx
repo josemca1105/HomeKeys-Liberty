@@ -3,8 +3,8 @@ import {
   ChevronRight,
   CircleUserRound,
   Image,
-  LockKeyhole,
   Mail,
+  Pencil,
   Phone,
   ShieldCheck,
   Users,
@@ -13,7 +13,7 @@ import { useEffect } from 'react'
 import { Link } from 'react-router'
 import { AppShell } from '@/components/layout/app-shell'
 import { useAuth } from '@/features/auth/auth-context'
-import type { AuthUser, UserRole } from '@/features/auth/auth.types'
+import type { UserRole } from '@/features/auth/auth.types'
 
 const roleLabels: Record<UserRole, string> = {
   ADMIN: 'Administrador',
@@ -63,36 +63,6 @@ function AccountRow({
   )
 }
 
-function PendingPasswordChange({ user }: { user: AuthUser }) {
-  return (
-    <div className="mx-auto mt-6 max-w-2xl">
-      <section className="overflow-hidden rounded-3xl border border-brand-gold/50 bg-white shadow-panel">
-        <div className="h-1.5 bg-gradient-to-r from-brand-gold via-brand-cyan to-brand-700" />
-        <div className="px-6 py-8 sm:px-9 sm:py-10">
-          <span className="grid size-12 place-items-center rounded-2xl bg-[#fff7dc] text-[#725b0a]">
-            <LockKeyhole aria-hidden="true" className="size-5" />
-          </span>
-          <p className="mt-6 text-sm font-semibold text-brand-slate">
-            Acción requerida
-          </p>
-          <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.035em] text-brand-950">
-            Cambia tu contraseña para continuar
-          </h1>
-          <p className="mt-4 max-w-xl text-base leading-7 text-ink-muted">
-            Hola, {user.firstName}. Por seguridad, tu cuenta requiere una nueva
-            contraseña antes de usar el resto del panel. La pantalla de cambio
-            se habilitará en el próximo módulo.
-          </p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-ink-muted">
-            Mientras tanto, puedes cerrar sesión desde la barra superior. Si
-            necesitas ayuda, contacta al administrador de tu equipo.
-          </p>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 export function DashboardPage() {
   const { user } = useAuth()
 
@@ -102,14 +72,6 @@ export function DashboardPage() {
 
   if (!user) {
     return null
-  }
-
-  if (user.mustChangePassword) {
-    return (
-      <AppShell>
-        <PendingPasswordChange user={user} />
-      </AppShell>
-    )
   }
 
   const fullName = `${user.firstName} ${user.lastName}`
@@ -184,6 +146,14 @@ export function DashboardPage() {
                 value={formatDate(user.createdAt)}
               />
             </div>
+
+            <Link
+              to="/perfil"
+              className="mt-6 inline-flex min-h-11 items-center gap-1.5 rounded-lg text-sm font-semibold text-brand-700 hover:text-brand-900"
+            >
+              <Pencil aria-hidden="true" className="size-4" />
+              Editar perfil
+            </Link>
           </section>
 
           <div className="grid gap-6">

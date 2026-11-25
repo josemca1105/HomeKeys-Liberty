@@ -40,8 +40,11 @@ export function ProtectedRoute() {
     )
   }
 
-  if (user?.mustChangePassword && location.pathname !== '/dashboard') {
-    return <Navigate to="/dashboard" replace />
+  if (
+    user?.mustChangePassword &&
+    location.pathname !== '/cambiar-contrasena'
+  ) {
+    return <Navigate to="/cambiar-contrasena" replace />
   }
 
   return <Outlet />
