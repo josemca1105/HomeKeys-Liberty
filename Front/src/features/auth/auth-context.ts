@@ -12,6 +12,8 @@ export interface AuthContextValue {
   notice: AuthNotice | null
   login: (input: LoginInput) => Promise<AuthUser>
   logout: () => Promise<void>
+  updateUser: (user: AuthUser) => void
+  endSession: (notice: AuthNotice) => void
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)

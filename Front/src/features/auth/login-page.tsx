@@ -2,86 +2,17 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useLocation, useNavigate } from 'react-router'
-import { BrandLogo } from '@/components/brand/brand-logo'
+import { useLocation, useNavigate, Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
 import { normalizeApiError } from '@/api/errors'
 import { useAuth } from './auth-context'
 import type { AuthNotice } from './auth.types'
+import { AuthPageShell } from './components/auth-shell'
 import { loginSchema, type LoginFormValues } from './login.schema'
 
 interface LoginLocationState {
   notice?: AuthNotice
-}
-
-interface BrandPanelProps {
-  className?: string
-}
-
-function BrandPanel({ className }: BrandPanelProps) {
-  return (
-    <aside
-      className={[
-        'auth-grid relative overflow-hidden bg-brand-950 px-10 py-12 text-white xl:px-16',
-        className ?? '',
-      ].join(' ')}
-    >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        <div className="absolute -right-28 top-[18%] h-48 w-[560px] -rotate-[24deg] border border-brand-cyan/25 bg-brand-700/25" />
-        <div className="absolute -right-16 top-[42%] h-20 w-[460px] -rotate-[24deg] bg-brand-cyan/15" />
-        <div className="absolute -left-36 bottom-[9%] h-32 w-[520px] -rotate-[24deg] bg-brand-gold/10" />
-        <div className="absolute bottom-0 left-[12%] h-40 w-px bg-gradient-to-t from-brand-gold/70 to-transparent" />
-      </div>
-
-      <div className="relative flex h-full flex-col">
-        <BrandLogo size="md" />
-
-        <div className="my-auto max-w-[580px] py-16">
-          <div aria-hidden="true" className="h-px w-16 bg-brand-gold" />
-          <p className="mt-8 max-w-[560px] font-display text-5xl font-medium leading-[1.04] tracking-[-0.045em] text-balance xl:text-6xl">
-            Cada propiedad empieza con una buena captación.
-          </p>
-          <p className="mt-7 max-w-[480px] text-lg leading-8 text-white/68">
-            El espacio de trabajo del equipo de HomeKeys Liberty para mantener
-            los datos, propietarios y fotografías en orden desde el primer
-            contacto.
-          </p>
-
-          <div className="mt-10 grid max-w-[500px] gap-3 text-[15px] text-white/72">
-            <p className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className="size-1.5 rounded-full bg-brand-cyan"
-              />
-              Información completa de cada captación
-            </p>
-            <p className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className="size-1.5 rounded-full bg-brand-gold"
-              />
-              Fotografías organizadas y protegidas
-            </p>
-            <p className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className="size-1.5 rounded-full bg-brand-slate"
-              />
-              Historial claro de cada cambio
-            </p>
-          </div>
-        </div>
-
-        <p className="relative text-sm text-white/45">
-          Panel interno de HomeKeys Liberty
-        </p>
-      </div>
-    </aside>
-  )
 }
 
 export function LoginPage() {
@@ -133,8 +64,13 @@ export function LoginPage() {
     setSubmitError(null)
 
     try {
-      await login(values)
-      navigate('/dashboard', { replace: true })
+      const loggedUser = await login(values)
+      navigate(
+        loggedUser.mustChangePassword
+          ? '/cambiar-contrasena'
+          : '/dashboard',
+        { replace: true },
+      )
     } catch (error) {
       const apiError = normalizeApiError(error)
 
@@ -157,23 +93,8 @@ export function LoginPage() {
     : undefined
 
   return (
-    <div className="min-h-dvh bg-[#f7fafb] lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(440px,0.92fr)]">
-      <BrandPanel className="hidden min-h-dvh lg:flex" />
-
-      <main className="flex min-h-dvh flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:px-8 md:px-12">
-        <div className="flex items-center gap-3 lg:hidden">
-          <BrandLogo size="sm" />
-          <div>
-            <p className="font-display text-base font-semibold text-brand-950">
-              HomeKeys Liberty
-            </p>
-            <p className="text-xs text-ink-muted">Panel interno</p>
-          </div>
-        </div>
-
-        <div className="flex flex-1 items-center justify-center py-10">
-          <div className="enter-rise enter-rise-late w-full max-w-[440px]">
-            <div aria-hidden="true" className="flex items-center gap-2">
+    <AuthPageShell>
+      <div aria-hidden="true" className="flex items-center gap-2">
               <span className="h-1 w-12 rounded-full bg-brand-700" />
               <span className="h-1 w-5 rounded-full bg-brand-cyan" />
               <span className="h-1 w-2.5 rounded-full bg-brand-gold" />
@@ -318,17 +239,16 @@ export function LoginPage() {
               </Button>
             </form>
 
-            <p className="mt-7 border-t border-line pt-5 text-sm leading-6 text-ink-muted">
-              ¿No puedes acceder? Contacta al administrador de tu equipo para
-              solicitar ayuda con tu cuenta.
-            </p>
-          </div>
-        </div>
-
-        <p className="text-center text-xs text-ink-muted/80">
-          Gestión de captaciones
-        </p>
-      </main>
-    </div>
+      <p className="mt-7 border-t border-line pt-5 text-sm leading-6 text-ink-muted">
+        ¿Olvidaste tu contraseña?{' '}
+        <Link
+          to="/forgot-password"
+          className="font-semibold text-brand-700 hover:text-brand-900"
+        >
+          Recupera tu acceso
+        </Link>
+        .
+      </p>
+    </AuthPageShell>
   )
 }

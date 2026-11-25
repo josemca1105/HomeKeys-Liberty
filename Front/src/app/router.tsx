@@ -13,6 +13,26 @@ const LoginPage = lazy(async () => {
   return { default: module.LoginPage }
 })
 
+const ForgotPasswordPage = lazy(async () => {
+  const module = await import('@/features/auth/forgot-password-page')
+  return { default: module.ForgotPasswordPage }
+})
+
+const ResetPasswordPage = lazy(async () => {
+  const module = await import('@/features/auth/reset-password-page')
+  return { default: module.ResetPasswordPage }
+})
+
+const ChangePasswordPage = lazy(async () => {
+  const module = await import('@/features/auth/change-password-page')
+  return { default: module.ChangePasswordPage }
+})
+
+const ProfilePage = lazy(async () => {
+  const module = await import('@/features/auth/profile-page')
+  return { default: module.ProfilePage }
+})
+
 const DashboardPage = lazy(async () => {
   const module = await import('@/features/dashboard/dashboard-page')
   return { default: module.DashboardPage }
@@ -55,10 +75,24 @@ export function AppRoutes() {
       <Routes>
         <Route element={<PublicOnlyRoute />}>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/forgot-password"
+            element={<ForgotPasswordPage />}
+          />
         </Route>
+
+        <Route
+          path="/reset-password"
+          element={<ResetPasswordPage />}
+        />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route
+            path="/cambiar-contrasena"
+            element={<ChangePasswordPage />}
+          />
+          <Route path="/perfil" element={<ProfilePage />} />
           <Route path="/captaciones" element={<PropertiesPage />} />
           <Route path="/captaciones/nueva" element={<CreatePropertyPage />} />
           <Route

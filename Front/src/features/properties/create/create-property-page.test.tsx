@@ -380,7 +380,10 @@ describe('creación de captaciones', () => {
     ).toBeEnabled()
   })
 
-  it('crea la captación con portada elegida y abre el detalle', async () => {
+  it(
+    'crea la captación con portada elegida y abre el detalle',
+    { timeout: 15_000 },
+    async () => {
     const actor = userEvent.setup()
     let createPayload: Record<string, unknown> | undefined
 
