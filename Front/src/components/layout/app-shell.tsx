@@ -2,6 +2,7 @@ import {
   Building2,
   LayoutDashboard,
   LogOut,
+  ScrollText,
   UserRound,
   UsersRound,
 } from 'lucide-react'
@@ -48,6 +49,15 @@ const adminNavigationItem = {
   end: false,
 } as const
 
+// Visible to every role: the backend scopes a PARTNER's history to its own
+// events.
+const auditNavigationItem = {
+  to: '/auditoria',
+  label: 'Auditoría',
+  icon: ScrollText,
+  end: false,
+} as const
+
 function UserAvatar({
   firstName,
   lastName,
@@ -85,8 +95,8 @@ export function AppShell({
 
   const visibleNavigationItems =
     user.role === 'ADMIN'
-      ? [...navigationItems, adminNavigationItem]
-      : [...navigationItems]
+      ? [...navigationItems, adminNavigationItem, auditNavigationItem]
+      : [...navigationItems, auditNavigationItem]
 
   const handleLogout = async () => {
     if (onNavigateAttempt && !onNavigateAttempt('/login')) {
@@ -259,9 +269,11 @@ export function AppShell({
           <div
             className={cn(
               'grid gap-1 py-1.5',
-              visibleNavigationItems.length >= 3
-                ? 'grid-cols-3'
-                : 'grid-cols-2',
+              visibleNavigationItems.length >= 4
+                ? 'grid-cols-4'
+                : visibleNavigationItems.length >= 3
+                  ? 'grid-cols-3'
+                  : 'grid-cols-2',
             )}
           >
             {visibleNavigationItems.map((item) => {
