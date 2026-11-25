@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { SessionLoading } from '@/components/feedback/session-loading'
 import {
+  AdminRoute,
   HomeRedirect,
   ProtectedRoute,
   PublicOnlyRoute,
@@ -69,6 +70,21 @@ const PropertyPhotosPage = lazy(async () => {
   return { default: module.PropertyPhotosPage }
 })
 
+const UsersPage = lazy(async () => {
+  const module = await import('@/features/users/pages/users-page')
+  return { default: module.UsersPage }
+})
+
+const UserInvitePage = lazy(async () => {
+  const module = await import('@/features/users/pages/user-invite-page')
+  return { default: module.UserInvitePage }
+})
+
+const UserDetailPage = lazy(async () => {
+  const module = await import('@/features/users/pages/user-detail-page')
+  return { default: module.UserDetailPage }
+})
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
@@ -107,6 +123,11 @@ export function AppRoutes() {
             path="/captaciones/:propertyId/fotos"
             element={<PropertyPhotosPage />}
           />
+          <Route element={<AdminRoute />}>
+            <Route path="/usuarios" element={<UsersPage />} />
+            <Route path="/usuarios/nuevo" element={<UserInvitePage />} />
+            <Route path="/usuarios/:userId" element={<UserDetailPage />} />
+          </Route>
         </Route>
 
         <Route path="/" element={<HomeRedirect />} />

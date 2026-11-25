@@ -50,6 +50,22 @@ export function ProtectedRoute() {
   return <Outlet />
 }
 
+// Nested inside ProtectedRoute: keeps the session guards and adds the role
+// gate. A PARTNER that reaches an ADMIN-only URL is silently sent home.
+export function AdminRoute() {
+  const { status, user } = useAuth()
+
+  if (status === 'initializing') {
+    return <SessionLoading message="Comprobando tu acceso…" />
+  }
+
+  if (user?.role !== 'ADMIN') {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  return <Outlet />
+}
+
 export function HomeRedirect() {
   const { notice, status } = useAuth()
 
