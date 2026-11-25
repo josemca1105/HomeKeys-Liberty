@@ -56,7 +56,12 @@ describe('AuthenticatedImage', () => {
       http.get(resolveApiResourceUrl(photoUrl), ({ request }) => {
         receivedAuthorization = request.headers.get('Authorization')
 
-        return new HttpResponse(new Blob(['image-bytes']), {
+        // A plain string body keeps the mocked response compatible with every
+        // Node version: a jsdom Blob lacks `.stream()` and undici's Response
+        // rejects it on Node 22 (the CI runner), even though Node 24 accepts
+        // it. `URL.createObjectURL` is stubbed below, so the body type never
+        // reaches the assertions.
+        return new HttpResponse('image-bytes', {
           headers: {
             'Content-Type': 'image/webp',
           },

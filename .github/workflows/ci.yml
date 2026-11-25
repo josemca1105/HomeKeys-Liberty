@@ -1,25 +1,75 @@
-name: Backend checks (manual)
+name: CI
 
-# GitHub Actions is kept as a manual, optional check. The primary gate is
-# `npm run verify` plus the versioned pre-push hook, so pushes never depend on
-# GitHub billing or on hosted runners.
+# Continuous integration for HomeKeys Liberty.
 #
-# Run it from the Actions tab with "Run workflow". The Redis job uses a service
-# container and executes the live rate-limit integration check.
+# Runs on every pull request and every push to main, plus manual dispatch from
+# the Actions tab.
+#
+# - frontend: typecheck, lint, tests and build for Front/. Also regenerates the
+#   typed API client from Back/openapi.yaml and fails when the generated file
+#   committed in the repository is out of sync with the contract.
+# - backend: `npm run verify` (typecheck, tests, build, prisma validate,
+#   audit). The test suite runs against the in-memory mock database, so no
+#   database service is required.
+# - redis-limiter: live rate-limit integration check using a Redis service
+#   container.
+
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: backend-manual-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Typecheck, tests, build and audit
+  frontend:
+    name: frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Front
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Front/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check generated API types are in sync with the OpenAPI contract
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/api/generated
+
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: Back
@@ -45,27 +95,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Validate Prisma schema
-        run: npx prisma validate
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Run the test suite
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-      - name: Audit production dependencies
-        run: npm audit --omit=dev
+      - name: Verify (typecheck, tests, build, prisma validate, audit)
+        run: npm run verify
 
   redis-limiter:
-    name: Redis rate-limit integration
+    name: redis-limiter
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: backend
     defaults:
       run:
@@ -100,9 +136,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate
 
       - name: Run the Redis rate-limit check
         run: npx tsx tests/live/redis-rate-limit-live.ts
