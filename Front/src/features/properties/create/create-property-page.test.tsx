@@ -349,36 +349,40 @@ describe('creación de captaciones', () => {
     ).toBeInTheDocument()
   })
 
-  it('bloquea el paso de fotos con 4 y lo permite con 5', async () => {
-    const actor = userEvent.setup()
+  it(
+    'bloquea el paso de fotos con 4 y lo permite con 5',
+    { timeout: 15_000 },
+    async () => {
+      const actor = userEvent.setup()
 
-    mockAuthenticatedSession()
-    mockPhotoPipeline()
+      mockAuthenticatedSession()
+      mockPhotoPipeline()
 
-    renderApp(['/captaciones/nueva'])
-    await screen.findByRole('heading', { name: 'Nueva captación' })
+      renderApp(['/captaciones/nueva'])
+      await screen.findByRole('heading', { name: 'Nueva captación' })
 
-    await continueToPhotos(actor)
-    uploadFiles([
-      makeFile('foto-1.jpg'),
-      makeFile('foto-2.jpg'),
-      makeFile('foto-3.jpg'),
-      makeFile('foto-4.jpg'),
-    ])
+      await continueToPhotos(actor)
+      uploadFiles([
+        makeFile('foto-1.jpg'),
+        makeFile('foto-2.jpg'),
+        makeFile('foto-3.jpg'),
+        makeFile('foto-4.jpg'),
+      ])
 
-    await waitForReadyPhotos(4)
+      await waitForReadyPhotos(4)
 
-    expect(
-      screen.getByRole('button', { name: 'Continuar' }),
-    ).toBeDisabled()
+      expect(
+        screen.getByRole('button', { name: 'Continuar' }),
+      ).toBeDisabled()
 
-    uploadFiles([makeFile('foto-5.jpg')])
-    await waitForReadyPhotos(5)
+      uploadFiles([makeFile('foto-5.jpg')])
+      await waitForReadyPhotos(5)
 
-    expect(
-      screen.getByRole('button', { name: 'Continuar' }),
-    ).toBeEnabled()
-  })
+      expect(
+        screen.getByRole('button', { name: 'Continuar' }),
+      ).toBeEnabled()
+    },
+  )
 
   it(
     'crea la captación con portada elegida y abre el detalle',

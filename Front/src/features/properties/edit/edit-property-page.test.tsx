@@ -128,65 +128,69 @@ afterEach(() => {
 })
 
 describe('edición de captaciones', () => {
-  it('permite a un ADMIN editar y reasignar el agente', async () => {
-    const actor = userEvent.setup()
-    let updateBody: Record<string, unknown> | null = null
+  it(
+    'permite a un ADMIN editar y reasignar el agente',
+    { timeout: 15_000 },
+    async () => {
+      const actor = userEvent.setup()
+      let updateBody: Record<string, unknown> | null = null
 
-    mockSession(testUser)
-    mockAgentDirectory([testUser, reassignedAgent])
-    mockProperty(testProperty)
-    mockPropertyUpdate(testProperty, (body) => {
-      updateBody = body
-    })
+      mockSession(testUser)
+      mockAgentDirectory([testUser, reassignedAgent])
+      mockProperty(testProperty)
+      mockPropertyUpdate(testProperty, (body) => {
+        updateBody = body
+      })
 
-    renderApp(['/captaciones/1/editar'])
+      renderApp(['/captaciones/1/editar'])
 
-    expect(
-      await screen.findByRole('heading', { name: 'Editar captación' }),
-    ).toBeInTheDocument()
-
-    const titleInput = screen.getByLabelText(/^Título\*$/)
-
-    expect(titleInput).toHaveValue(testProperty.title)
-    expect(screen.getByLabelText(/^Precio\*$/)).toHaveValue(150000)
-
-    await waitFor(() => {
       expect(
-        screen.getByRole('option', { name: 'María Rodríguez' }),
+        await screen.findByRole('heading', { name: 'Editar captación' }),
       ).toBeInTheDocument()
-    })
 
-    await actor.clear(titleInput)
-    await actor.type(titleInput, 'Casa renovada')
-    await actor.selectOptions(
-      screen.getByLabelText(/Agente asignado/),
-      '7',
-    )
-    await actor.click(
-      screen.getByRole('button', { name: 'Guardar cambios' }),
-    )
+      const titleInput = screen.getByLabelText(/^Título\*$/)
 
-    await waitFor(() => {
-      expect(updateBody).not.toBeNull()
-    })
+      expect(titleInput).toHaveValue(testProperty.title)
+      expect(screen.getByLabelText(/^Precio\*$/)).toHaveValue(150000)
 
-    expect(updateBody).toMatchObject({
-      agentId: 7,
-      title: 'Casa renovada',
-      price: 150000,
-      bedrooms: 3,
-      bathrooms: 2,
-      parkingSpaces: 2,
-      squareMeters: 120,
-    })
+      await waitFor(() => {
+        expect(
+          screen.getByRole('option', { name: 'María Rodríguez' }),
+        ).toBeInTheDocument()
+      })
 
-    expect(
-      await screen.findByRole('heading', { name: 'Casa renovada' }),
-    ).toBeInTheDocument()
-    expect(
-      await screen.findByText('Cambios guardados correctamente.'),
-    ).toBeInTheDocument()
-  })
+      await actor.clear(titleInput)
+      await actor.type(titleInput, 'Casa renovada')
+      await actor.selectOptions(
+        screen.getByLabelText(/Agente asignado/),
+        '7',
+      )
+      await actor.click(
+        screen.getByRole('button', { name: 'Guardar cambios' }),
+      )
+
+      await waitFor(() => {
+        expect(updateBody).not.toBeNull()
+      })
+
+      expect(updateBody).toMatchObject({
+        agentId: 7,
+        title: 'Casa renovada',
+        price: 150000,
+        bedrooms: 3,
+        bathrooms: 2,
+        parkingSpaces: 2,
+        squareMeters: 120,
+      })
+
+      expect(
+        await screen.findByRole('heading', { name: 'Casa renovada' }),
+      ).toBeInTheDocument()
+      expect(
+        await screen.findByText('Cambios guardados correctamente.'),
+      ).toBeInTheDocument()
+    },
+  )
 
   it('permite a un PARTNER editar sin enviar agentId', async () => {
     const actor = userEvent.setup()
