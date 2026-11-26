@@ -1,0 +1,14 @@
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+.playwright/
+test-results/
+playwright-report/
+
+# Postman plugin scaffolding (machine-generated)
+.agents/
+
+# Local env secrets at the repo root. Front/ and Back/ keep their own
+# rules; deeper .gitignore files take precedence over these.
+.env
+.env.*
+!.env.example

@@ -1,0 +1,19 @@
+{
+  "permission": {
+    "skill": {
+      "playwright-cli": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "playwright-cli *": "allow",
+      "npm test*": "allow",
+      "npm run lint*": "allow",
+      "npm run typecheck*": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git add *": "deny",
+      "git commit *": "deny",
+      "git push *": "deny"
+    }
+  }
+}

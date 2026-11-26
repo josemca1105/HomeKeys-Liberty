@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { SessionLoading } from '@/components/feedback/session-loading'
+import { RouteErrorBoundary } from './route-error-boundary'
 import {
   AdminRoute,
   HomeRedirect,
@@ -92,54 +93,56 @@ const AuditPage = lazy(async () => {
 
 export function AppRoutes() {
   return (
-    <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
-      <Routes>
-        <Route element={<PublicOnlyRoute />}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/forgot-password"
-            element={<ForgotPasswordPage />}
-          />
-        </Route>
-
-        <Route
-          path="/reset-password"
-          element={<ResetPasswordPage />}
-        />
-
-        <Route element={<ProtectedRoute />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route
-            path="/cambiar-contrasena"
-            element={<ChangePasswordPage />}
-          />
-          <Route path="/perfil" element={<ProfilePage />} />
-          <Route path="/captaciones" element={<PropertiesPage />} />
-          <Route path="/captaciones/nueva" element={<CreatePropertyPage />} />
-          <Route
-            path="/captaciones/:propertyId"
-            element={<PropertyDetailPage />}
-          />
-          <Route
-            path="/captaciones/:propertyId/editar"
-            element={<EditPropertyPage />}
-          />
-          <Route
-            path="/captaciones/:propertyId/fotos"
-            element={<PropertyPhotosPage />}
-          />
-          <Route element={<AdminRoute />}>
-            <Route path="/usuarios" element={<UsersPage />} />
-            <Route path="/usuarios/nuevo" element={<UserInvitePage />} />
-            <Route path="/usuarios/:userId" element={<UserDetailPage />} />
+    <RouteErrorBoundary>
+      <Suspense fallback={<SessionLoading message="Cargando el panel…" />}>
+        <Routes>
+          <Route element={<PublicOnlyRoute />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/forgot-password"
+              element={<ForgotPasswordPage />}
+            />
           </Route>
-          <Route path="/auditoria" element={<AuditPage />} />
-        </Route>
 
-        <Route path="/" element={<HomeRedirect />} />
-        <Route path="*" element={<UnknownRoute />} />
-      </Routes>
-    </Suspense>
+          <Route
+            path="/reset-password"
+            element={<ResetPasswordPage />}
+          />
+
+          <Route element={<ProtectedRoute />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route
+              path="/cambiar-contrasena"
+              element={<ChangePasswordPage />}
+            />
+            <Route path="/perfil" element={<ProfilePage />} />
+            <Route path="/captaciones" element={<PropertiesPage />} />
+            <Route path="/captaciones/nueva" element={<CreatePropertyPage />} />
+            <Route
+              path="/captaciones/:propertyId"
+              element={<PropertyDetailPage />}
+            />
+            <Route
+              path="/captaciones/:propertyId/editar"
+              element={<EditPropertyPage />}
+            />
+            <Route
+              path="/captaciones/:propertyId/fotos"
+              element={<PropertyPhotosPage />}
+            />
+            <Route element={<AdminRoute />}>
+              <Route path="/usuarios" element={<UsersPage />} />
+              <Route path="/usuarios/nuevo" element={<UserInvitePage />} />
+              <Route path="/usuarios/:userId" element={<UserDetailPage />} />
+            </Route>
+            <Route path="/auditoria" element={<AuditPage />} />
+          </Route>
+
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="*" element={<UnknownRoute />} />
+        </Routes>
+      </Suspense>
+    </RouteErrorBoundary>
   )
 }
 
